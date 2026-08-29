@@ -20,10 +20,9 @@
 -->
 <script>
   var FACTURES_URL = "http://10.210.0.47:8484/o/docs/q6Ddhj3FdJ9F/SuivibudgetDSI2026CNF2026-08-29/p/10";
-  // Ancre de filtrage : id du widget « Par état de liquidation » sur la page Factures
-  // et colRef d'une de ses colonnes (voir journal). Cliquer une part sélectionne la ligne
-  // correspondante, ce qui filtre « Toutes les factures » (widgets liés).
-  var ANCHOR_SECTION = 34, ANCHOR_COL = 136;
+  // Filtrage au clic : l'état cliqué est déposé dans localStorage (partagé avec le
+  // sélecteur etats-dsi.html, même origine GitHub Pages) qui l'applique à l'arrivée.
+  var LS_KEY = "dsiEtatFiltre";
 </script>
 <script src="grist-plugin-api.js"></script>
 <script>
@@ -88,11 +87,13 @@
     return COLORS[label];
   }
 
-  function openFactures(rowId) {
-    var url = FACTURES_URL;
-    if (rowId) url += "#a1.s" + ANCHOR_SECTION + ".r" + rowId + ".c" + ANCHOR_COL;
-    try { window.top.location.href = url; }
-    catch (e) { window.open(url, "_blank"); }
+  function openFactures(etat) {
+    if (etat) {
+      try { localStorage.setItem(LS_KEY, JSON.stringify({ etat: String(etat), ts: Date.now() })); }
+      catch (e) {}
+    }
+    try { window.top.location.href = FACTURES_URL; }
+    catch (e) { window.open(FACTURES_URL, "_blank"); }
   }
 
   function polar(cx, cy, r, a) { // a en radians, 0 = haut, sens horaire
@@ -144,7 +145,7 @@
       el.setAttribute("fill", colorFor(k));
       el.setAttribute("stroke", "#fff");
       el.setAttribute("stroke-width", "2");
-      el.addEventListener("click", function () { openFactures(groups[k].rowId); });
+      el.addEventListener("click", function () { openFactures(k); });
       var t = document.createElementNS(NS, "title");
       t.textContent = k + " : " + groups[k].n + " facture(s), " + fmtEuro.format(groups[k].sum) + " €";
       el.appendChild(t);
@@ -163,7 +164,7 @@
 
       var row = document.createElement("div");
       row.className = "lrow";
-      row.addEventListener("click", function () { openFactures(groups[k].rowId); });
+      row.addEventListener("click", function () { openFactures(k); });
       row.innerHTML =
         '<span class="sw" style="background:' + colorFor(k) + '"></span>' +
         '<span class="lbl">' + k.replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</span>' +
