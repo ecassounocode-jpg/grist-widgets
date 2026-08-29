@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>KPI budget DSI — widget Grist</title>
+<!--
+  Widget Grist : bandeau de KPI (totaux budget) style Power BI — 3 styles au choix.
+  Ville de Roubaix — DSI — Suivi budget & factures CNF
+
+  UTILISATION :
+  - Héberger à côté de pie-dsi.html / nav-dsi.html (GitHub Pages).
+  - Dans Grist : widget Personnalisée, source = table de synthèse des totaux
+    (Lignes_Budget_summary), accès « Lire la table sélectionnée ».
+  - Style via l'URL : ?style=cards (tuiles) | ?style=dark (bandeau sombre) | ?style=bar (ligne + jauges)
+-->
+<script src="grist-plugin-api.js"></script>
+<script>
+  if (!window.grist) {
+    document.write('<script src="https://docs.getgrist.com/grist-plugin-api.js"><\/script>');
+  }
+</script>
+<style>
+  :root { color-scheme: light; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+    font-family: "Segoe UI", -apple-system, Roboto, Arial, sans-serif; background: #fff; color: #252423; }
+  #root { height: 100%; display: flex; align-items: center; }
+
+  /* ---------- style "cards" : tuiles Power BI ---------- */
+  .cards { display: flex; gap: 10px; width: 100%; padding: 4px 2px; box-sizing: border-box; }
+  .cards .kpi { flex: 1 1 0; background: #fff; border: 1px solid #EDEBE9; border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 8px 12px 9px; min-width: 0;
+    border-top: 3px solid var(--acc, #118DFF); }
+  .cards .lb { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #605E5C;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cards .vl { font-size: 21px; font-weight: 600; margin-top: 2px; white-space: nowrap; }
+  .cards .vl small { font-size: 12px; font-weight: 400; color: #605E5C; }
+
+  /* ---------- style "dark" : bandeau anthracite ---------- */
+  .dark { display: flex; align-items: stretch; width: 100%; height: 56px;
+    background: #252423; border-radius: 4px; overflow: hidden; }
+  .dark .kpi { flex: 1 1 0; display: flex; flex-direction: column; justify-content: center;
+    padding: 0 14px; min-width: 0; border-left: 1px solid #3b3a39; }
+  .dark .kpi:first-child { border-left: none; }
+  .dark .lb { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #a19f9d; white-space: nowrap; }
+  .dark .vl { font-size: 17px; font-weight: 600; color: #fff; white-space: nowrap; }
+  .dark .kpi.hl .vl { color: #F2C811; }
+
+  /* ---------- style "bar" : ligne compacte + jauges ---------- */
+  .bar { display: flex; align-items: center; gap: 22px; width: 100%; padding: 4px 6px; box-sizing: border-box; }
+  .bar .kpi { min-width: 0; }
+  .bar .lb { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #605E5C; white-space: nowrap; }
+  .bar .vl { font-size: 18px; font-weight: 600; white-space: nowrap; }
+  .bar .gg { width: 130px; }
+  .bar .track { height: 6px; background: #EDEBE9; border-radius: 3px; margin-top: 4px; overflow: hidden; }
+  .bar .fill { height: 100%; border-radius: 3px; background: var(--acc, #118DFF); }
+  .bar .pv { font-size: 13px; font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+(function () {
+  "use strict";
+  var qs = new URLSearchParams(window.location.search);
+  var style = (qs.get("style") || "cards").toLowerCase();
+
+  var euro = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
+  var pct  = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+  var fe = v => euro.format(Math.round(v || 0));
+  var fp = v => { var x = (v == null ? 0 : v); if (Math.abs(x) <= 1.5) x = x * 100; return pct.format(x); };
+
+  function render(rec) {
+    var K = [
+      { lb: "Budgété",            vl: fe(rec.Budgete) + " €",  acc: "#118DFF", money: 1 },
+      { lb: "Mandaté",            vl: fe(rec.Mandate) + " €",  acc: "#E66C37", money: 1 },
+      { lb: "Eng. non soldés",    vl: fe(rec.ENS) + " €",      acc: "#744EC2", money: 1 },
+      { lb: "Disponible",         vl: fe(rec.Disponible) + " €", acc: "#1AAB40", money: 1 },
+      { lb: "Taux de réalisation", vl: fp(rec.Taux_Realisation) + " %", acc: "#118DFF", gauge: rec.Taux_Realisation },
+      { lb: "Taux d'engagement",   vl: fp(rec.Taux_Engagement) + " %",  acc: "#E66C37", gauge: rec.Taux_Engagement }
+    ];
+    var root = document.getElementById("root");
+    var h = "";
+    if (style === "dark") {
+      h = '<div class="dark">' + K.map(function (k, i) {
+        return '<div class="kpi' + (i < 1 ? ' hl' : '') + '"><span class="lb">' + k.lb + '</span><span class="vl">' + k.vl + '</span></div>';
+      }).join("") + '</div>';
+    } else if (style === "bar") {
+      h = '<div class="bar">' + K.map(function (k) {
+        if (k.gauge !== undefined) {
+          var x = k.gauge == null ? 0 : (Math.abs(k.gauge) <= 1.5 ? k.gauge * 100 : k.gauge);
+          var w = Math.max(0, Math.min(100, x));
+          return '<div class="kpi gg" style="--acc:' + k.acc + '"><span class="lb">' + k.lb +
+                 ' — <span class="pv">' + k.vl + '</span></span><div class="track"><div class="fill" style="width:' + w + '%"></div></div></div>';
+        }
+        return '<div class="kpi"><span class="lb">' + k.lb + '</span><div class="vl">' + k.vl + '</div></div>';
+      }).join("") + '</div>';
+    } else { // cards
+      h = '<div class="cards">' + K.map(function (k) {
+        return '<div class="kpi" style="--acc:' + k.acc + '"><div class="lb">' + k.lb + '</div><div class="vl">' + k.vl + '</div></div>';
+      }).join("") + '</div>';
+    }
+    root.innerHTML = h;
+  }
+
+  function start() {
+    if (!window.grist) {
+      document.getElementById("root").textContent = "grist-plugin-api.js introuvable.";
+      return;
+    }
+    grist.ready({ requiredAccess: "read table" });
+    grist.onRecords(function (records) {
+      if (records && records.length) render(records[0]);
+    });
+    grist.onRecord(function (record) { if (record) render(record); });
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+})();
+</script>
+</body>
+</html>
