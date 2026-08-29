@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Lignes budgétaires — matrice Power BI</title>
+<!--
+  Widget Grist : lignes budgétaires en « matrice » style Power BI (lecture seule).
+  Ville de Roubaix — DSI — Suivi budget & factures CNF
+  Source : table Lignes_Budget, accès « Lire la table sélectionnée ».
+  Tri par clic sur les en-têtes ; recherche plein texte ; jauge de taux ; pastille d'alerte.
+-->
+<script src="grist-plugin-api.js"></script>
+<script>
+  if (!window.grist) {
+    document.write('<script src="https://docs.getgrist.com/grist-plugin-api.js"><\/script>');
+  }
+</script>
+<style>
+  :root { color-scheme: light; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+    font-family: "Segoe UI", -apple-system, Roboto, Arial, sans-serif; color: #252423; background: #fff; }
+  #top { display: flex; align-items: center; gap: 10px; padding: 6px 8px 4px; }
+  #q { flex: 0 0 220px; font: inherit; font-size: 12px; padding: 4px 8px;
+    border: 1px solid #C8C6C4; border-radius: 4px; outline: none; }
+  #q:focus { border-color: #118DFF; }
+  #count { font-size: 11px; color: #605E5C; }
+  #box { height: calc(100% - 36px); overflow: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  thead th { position: sticky; top: 0; background: #F3F2F1; color: #252423;
+    font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .3px;
+    padding: 6px 10px; border-bottom: 2px solid #C8C6C4; cursor: pointer; user-select: none;
+    white-space: nowrap; text-align: left; z-index: 1; }
+  thead th.num { text-align: right; }
+  thead th .arr { font-size: 9px; color: #118DFF; margin-left: 3px; }
+  tbody td { padding: 5px 10px; border-bottom: 1px solid #EDEBE9; white-space: nowrap; }
+  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody td.neg { color: #D13438; }
+  tbody tr:nth-child(even) { background: #FAF9F8; }
+  tbody tr:hover { background: #EFF6FC; }
+  td.lib { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+  .sec { font-size: 10.5px; color: #605E5C; }
+  .gauge { display: inline-flex; align-items: center; gap: 6px; }
+  .track { width: 70px; height: 6px; background: #EDEBE9; border-radius: 3px; overflow: hidden; }
+  .fill { height: 100%; border-radius: 3px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 9px; font-size: 11px; font-weight: 600; }
+  .p-ok   { background: #DFF6DD; color: #107C10; }
+  .p-warn { background: #FFF4CE; color: #8A6A00; }
+  .p-crit { background: #FDE7E9; color: #A80000; }
+</style>
+</head>
+<body>
+<div id="top">
+  <input id="q" type="search" placeholder="Rechercher…">
+  <span id="count"></span>
+</div>
+<div id="box"><table>
+  <thead><tr id="hdr"></tr></thead>
+  <tbody id="body"></tbody>
+</table></div>
+<script>
+(function () {
+  "use strict";
+  var euro = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
+  var pct  = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+  var fe = v => euro.format(Math.round(v || 0)) + " €";
+  var toPct = v => { var x = v == null ? 0 : v; return Math.abs(x) <= 1.5 ? x * 100 : x; };
+
+  var COLS = [
+    { id: "Libelle_Complet", lb: "Ligne budgétaire", type: "lib" },
+    { id: "Section",         lb: "Section",          type: "txt" },
+    { id: "Budgete",         lb: "Budgété",          type: "eur" },
+    { id: "Mandate",         lb: "Mandaté",          type: "eur" },
+    { id: "ENS",             lb: "Eng. non soldés",  type: "eur" },
+    { id: "Disponible",      lb: "Disponible",       type: "eur" },
+    { id: "Taux_Engagement", lb: "Taux d'engag.",    type: "gauge" },
+    { id: "Alerte",          lb: "Alerte",           type: "pill" }
+  ];
+  var DATA = [], sortCol = "Budgete", sortDir = -1, query = "";
+
+  function gaugeColor(p) { return p >= 100 ? "#D13438" : (p > 90 ? "#E66C37" : "#1AAB40"); }
+
+  function pillHtml(txt) {
+    var t = String(txt || "");
+    var cls = "p-ok";
+    if (t.indexOf("🔴") >= 0 || t.indexOf("Dépass") >= 0) cls = "p-crit";
+    else if (t.indexOf("🟠") >= 0 || t.indexOf("> 90") >= 0) cls = "p-warn";
+    var label = t.replace(/[🟠🔴🟢⚪\u{1F7E0}-\u{1F7EB}]/gu, "").trim() || "—";
+    return '<span class="pill ' + cls + '">' + label.replace(/</g, "&lt;") + '</span>';
+  }
+
+  function render() {
+    var hdr = document.getElementById("hdr");
+    hdr.innerHTML = COLS.map(function (c) {
+      var arr = c.id === sortCol ? '<span class="arr">' + (sortDir < 0 ? "▼" : "▲") + '</span>' : "";
+      var num = (c.type === "eur" || c.type === "gauge") ? " class=\"num\"" : "";
+      return "<th data-id=\"" + c.id + "\"" + num + ">" + c.lb + arr + "</th>";
+    }).join("");
+    Array.prototype.forEach.call(hdr.children, function (th) {
+      th.onclick = function () {
+        var id = th.getAttribute("data-id");
+        if (sortCol === id) sortDir = -sortDir; else { sortCol = id; sortDir = -1; }
+        render();
+      };
+    });
+
+    var rows = DATA.filter(function (r) {
+      if (!query) return true;
+      var s = (r.Libelle_Complet + " " + r.Section + " " + r.Alerte).toLowerCase();
+      return s.indexOf(query) >= 0;
+    });
+    rows.sort(function (a, b) {
+      var x = a[sortCol], y = b[sortCol];
+      if (typeof x === "string" || typeof y === "string")
+        return sortDir * String(x || "").localeCompare(String(y || ""), "fr");
+      return sortDir * ((x || 0) - (y || 0));
+    });
+
+    document.getElementById("count").textContent = rows.length + " ligne(s)";
+    document.getElementById("body").innerHTML = rows.map(function (r) {
+      return "<tr>" + COLS.map(function (c) {
+        var v = r[c.id];
+        if (c.type === "eur") {
+          var n = v || 0;
+          return '<td class="num' + (n < 0 ? " neg" : "") + '">' + fe(n) + "</td>";
+        }
+        if (c.type === "gauge") {
+          var p = toPct(v), w = Math.max(0, Math.min(100, p));
+          return '<td class="num"><span class="gauge"><span class="track"><span class="fill" style="width:' +
+                 w + '%;background:' + gaugeColor(p) + '"></span></span>' + pct.format(p) + " %</span></td>";
+        }
+        if (c.type === "pill") return "<td>" + pillHtml(v) + "</td>";
+        if (c.type === "lib") return '<td class="lib" title="' + String(v || "").replace(/"/g, "&quot;") + '">' +
+                                     String(v || "").replace(/</g, "&lt;") + "</td>";
+        return '<td class="sec">' + String(v || "").replace(/</g, "&lt;") + "</td>";
+      }).join("") + "</tr>";
+    }).join("");
+  }
+
+  document.getElementById("q").addEventListener("input", function (e) {
+    query = e.target.value.trim().toLowerCase(); render();
+  });
+
+  function start() {
+    if (!window.grist) { document.getElementById("count").textContent = "grist-plugin-api.js introuvable."; return; }
+    grist.ready({ requiredAccess: "read table" });
+    grist.onRecords(function (records) { DATA = records || []; render(); });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+})();
+</script>
+</body>
+</html>
