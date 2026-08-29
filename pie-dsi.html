@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Factures par état — widget Grist</title>
+<!--
+  Widget personnalisé Grist : camembert « Factures par état »
+  Ville de Roubaix — DSI — Suivi budget & factures CNF
+
+  DÉPLOIEMENT (GitLab Pages ou tout serveur web servant du text/html) :
+  1. Déposer ce fichier tel quel dans le dépôt (ex. public/pie-dsi.html pour GitLab Pages).
+  2. (Recommandé) Déposer à côté le fichier grist-plugin-api.js, téléchargeable depuis
+     http://localhost:8585/grist-plugin-api.js — le widget fonctionne alors sans internet.
+     Sinon, la copie en ligne https://docs.getgrist.com/grist-plugin-api.js est utilisée.
+  3. Dans Grist : widget « Personnalisée » > URL = l'adresse publique de ce fichier,
+     Accès = « Lire la table sélectionnée », source de données = table Factures.
+  NB : un lien « raw » GitLab ne convient pas (servi en text/plain) — il faut GitLab Pages.
+
+  RÉGLAGE : l'URL ouverte au clic (page Factures du document Grist) :
+-->
+<script>
+  var FACTURES_URL = "http://10.210.0.47:8484/o/docs/q6Ddhj3FdJ9F/SuivibudgetDSI2026CNF2026-08-29/p/10";
+</script>
+<script src="grist-plugin-api.js"></script>
+<script>
+  if (!window.grist) {
+    document.write('<script src="https://docs.getgrist.com/grist-plugin-api.js"><\/script>');
+  }
+</script>
+<style>
+  :root { color-scheme: light; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #fff;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #262633; }
+  #wrap { display: flex; align-items: center; justify-content: center; gap: 28px;
+    height: 100%; padding: 8px 16px; box-sizing: border-box; flex-wrap: wrap; }
+  #chart { flex: 0 1 auto; cursor: pointer; }
+  #legend { flex: 0 1 auto; font-size: 13px; }
+  .lrow { display: flex; align-items: center; gap: 8px; padding: 3px 4px;
+    border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  .lrow:hover { background: #f0f0f2; }
+  .sw { width: 12px; height: 12px; border-radius: 2px; flex: 0 0 auto; }
+  .lbl { min-width: 175px; }
+  .val { color: #55556a; font-variant-numeric: tabular-nums; }
+  #hint { margin-top: 10px; font-size: 12px; color: #8a8a99; }
+  #empty { color: #8a8a99; font-size: 13px; }
+  text.pct { font-size: 13px; font-weight: 600; fill: #fff; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="chart" width="230" height="230" viewBox="0 0 230 230" role="img"
+       aria-label="Répartition des factures par état"></svg>
+  <div id="legendbox">
+    <div id="legend"></div>
+    <div id="hint">&#128070; Cliquer sur une part ou une ligne ouvre la page Factures</div>
+  </div>
+</div>
+<script>
+(function () {
+  "use strict";
+
+  // Couleurs par état de liquidation (celles du tableau de bord actuel)
+  var COLORS = {
+    "Mandatée": "#EF9A4D",
+    "En attente de rapprochement": "#3B82F6",
+    "Mandatée (+annulation)": "#2E9E68",
+    "Rapprochée aux engagements": "#E15241",
+    "Annulée": "#9CA3AF",
+    "(sans état)": "#C4C4CF"
+  };
+  var EXTRA = ["#8B5CF6", "#0EA5E9", "#D97706", "#DB2777", "#64748B"]; // au cas où
+  var extraIdx = 0;
+
+  var fmtEuro = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
+  var fmtPct  = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+
+  function colorFor(label) {
+    if (!COLORS[label]) COLORS[label] = EXTRA[extraIdx++ % EXTRA.length];
+    return COLORS[label];
+  }
+
+  function openFactures() {
+    try { window.top.location.href = FACTURES_URL; }
+    catch (e) { window.open(FACTURES_URL, "_blank"); }
+  }
+
+  function polar(cx, cy, r, a) { // a en radians, 0 = haut, sens horaire
+    return [cx + r * Math.sin(a), cy - r * Math.cos(a)];
+  }
+
+  function slicePath(cx, cy, r, a0, a1) {
+    var p0 = polar(cx, cy, r, a0), p1 = polar(cx, cy, r, a1);
+    var large = (a1 - a0) > Math.PI ? 1 : 0;
+    return "M" + cx + "," + cy + " L" + p0[0] + "," + p0[1] +
+           " A" + r + "," + r + " 0 " + large + " 1 " + p1[0] + "," + p1[1] + " Z";
+  }
+
+  function render(records) {
+    var svg = document.getElementById("chart");
+    var legend = document.getElementById("legend");
+    svg.innerHTML = ""; legend.innerHTML = "";
+
+    // Agrégation par état de liquidation
+    var groups = {}, order = [];
+    (records || []).forEach(function (r) {
+      var k = (r.Etat_Liquidation == null || r.Etat_Liquidation === "") ? "(sans état)" : String(r.Etat_Liquidation);
+      if (!groups[k]) { groups[k] = { n: 0, sum: 0 }; order.push(k); }
+      groups[k].n += 1;
+      groups[k].sum += (typeof r.Montant_TTC === "number" ? r.Montant_TTC : 0);
+    });
+    order.sort(function (a, b) { return groups[b].n - groups[a].n; });
+
+    var total = order.reduce(function (s, k) { return s + groups[k].n; }, 0);
+    if (!total) {
+      legend.innerHTML = '<div id="empty">Aucune facture à afficher.</div>';
+      return;
+    }
+
+    var cx = 115, cy = 115, R = 108, a = 0;
+    var NS = "http://www.w3.org/2000/svg";
+    order.forEach(function (k) {
+      var frac = groups[k].n / total;
+      var a1 = a + frac * 2 * Math.PI;
+      var el;
+      if (frac >= 0.999) { // une seule part : cercle plein
+        el = document.createElementNS(NS, "circle");
+        el.setAttribute("cx", cx); el.setAttribute("cy", cy); el.setAttribute("r", R);
+      } else {
+        el = document.createElementNS(NS, "path");
+        el.setAttribute("d", slicePath(cx, cy, R, a, a1));
+      }
+      el.setAttribute("fill", colorFor(k));
+      el.setAttribute("stroke", "#fff");
+      el.setAttribute("stroke-width", "2");
+      el.addEventListener("click", openFactures);
+      var t = document.createElementNS(NS, "title");
+      t.textContent = k + " : " + groups[k].n + " facture(s), " + fmtEuro.format(groups[k].sum) + " €";
+      el.appendChild(t);
+      svg.appendChild(el);
+
+      if (frac >= 0.08) { // pourcentage lisible dans la part
+        var mid = (a + a1) / 2, pos = polar(cx, cy, R * 0.62, mid);
+        var tx = document.createElementNS(NS, "text");
+        tx.setAttribute("x", pos[0]); tx.setAttribute("y", pos[1] + 4);
+        tx.setAttribute("text-anchor", "middle");
+        tx.setAttribute("class", "pct");
+        tx.textContent = fmtPct.format(frac * 100) + "%";
+        svg.appendChild(tx);
+      }
+      a = a1;
+
+      var row = document.createElement("div");
+      row.className = "lrow";
+      row.addEventListener("click", openFactures);
+      row.innerHTML =
+        '<span class="sw" style="background:' + colorFor(k) + '"></span>' +
+        '<span class="lbl">' + k.replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</span>' +
+        '<span class="val">' + groups[k].n + " · " + fmtEuro.format(groups[k].sum) + " €</span>";
+      legend.appendChild(row);
+    });
+  }
+
+  function start() {
+    if (!window.grist) { // API non chargée : message clair plutôt qu'une page blanche
+      document.getElementById("legend").innerHTML =
+        '<div id="empty">grist-plugin-api.js introuvable — le déposer à côté de ce fichier.</div>';
+      return;
+    }
+    grist.ready({ requiredAccess: "read table" });
+    grist.onRecords(function (records) { render(records || []); });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start);
+  } else { start(); }
+})();
+</script>
+</body>
+</html>
