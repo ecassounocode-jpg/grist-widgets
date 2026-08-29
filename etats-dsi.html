@@ -7,7 +7,8 @@
   Widget Grist : sélecteur « Par état de liquidation » avec bouton « Tous les états ».
   Ville de Roubaix — DSI — Suivi budget & factures CNF
 
-  - Source : Factures_summary_Etat_Liquidation, accès « Lire la table sélectionnée ».
+  - Source : table Factures, accès « Lire la table sélectionnée » (le widget agrège
+    lui-même par état et envoie à Grist la liste des factures à afficher).
   - Ce widget PILOTE la liste « Toutes les factures » : dans la config de la liste,
     « Sélectionner par » = ce widget (fait via l'API : linkSrcSectionRef).
   - « Tous les états » = setSelectedRows(null) → aucun filtre.
@@ -32,8 +33,10 @@
   .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
   .lb { flex: 1 1 auto; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .row.all .lb { font-weight: 600; }
-  .ct { font-size: 12px; color: #605E5C; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .ct b { color: #252423; font-weight: 600; }
+  .ct { font-size: 12px; color: #605E5C; font-variant-numeric: tabular-nums; white-space: nowrap;
+    display: inline-flex; gap: 10px; }
+  .ct .cnt { display: inline-block; min-width: 3em; text-align: right; color: #252423; font-weight: 600; }
+  .ct .amt { display: inline-block; min-width: 7.5em; text-align: right; }
 </style>
 </head>
 <body>
@@ -50,35 +53,45 @@
     "Annulée": "#9CA3AF"
   };
   var euro = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
-  var DATA = [], activeId = null; // null = tous
+  var GROUPS = {}, ORDER = [], activeKey = null; // null = tous
 
-  function apply(id) {
-    activeId = id;
-    try { grist.setSelectedRows(id == null ? null : [id]); } catch (e) {}
+  function rebuild(records) {
+    GROUPS = {}; ORDER = [];
+    (records || []).forEach(function (r) {
+      var k = (r.Etat_Liquidation == null || r.Etat_Liquidation === "") ? "(sans état)" : String(r.Etat_Liquidation);
+      if (!GROUPS[k]) { GROUPS[k] = { n: 0, sum: 0, ids: [] }; ORDER.push(k); }
+      GROUPS[k].n += 1;
+      GROUPS[k].sum += (typeof r.Montant_TTC === "number" ? r.Montant_TTC : 0);
+      GROUPS[k].ids.push(r.id);
+    });
+    ORDER.sort(function (a, b) { return GROUPS[b].n - GROUPS[a].n; });
+  }
+
+  function apply(key) {
+    activeKey = key;
+    try { grist.setSelectedRows(key == null ? null : GROUPS[key].ids); } catch (e) {}
     render();
   }
 
   function render() {
-    var total = DATA.reduce(function (s, r) { return s + (r.count || 0); }, 0);
-    var somme = DATA.reduce(function (s, r) { return s + (r.Montant_TTC || 0); }, 0);
+    var total = 0, somme = 0;
+    ORDER.forEach(function (k) { total += GROUPS[k].n; somme += GROUPS[k].sum; });
     var list = document.getElementById("list");
-    var h = '<div class="row all' + (activeId == null ? ' active' : '') + '" data-id="">' +
+    var h = '<div class="row all' + (activeKey == null ? ' active' : '') + '" data-k="">' +
             '<span class="dot" style="background:#252423"></span>' +
             '<span class="lb">Tous les états</span>' +
-            '<span class="ct"><b>' + total + '</b> · ' + euro.format(somme) + " €</span></div>";
-    var rows = DATA.slice().sort(function (a, b) { return (b.count||0) - (a.count||0); });
-    h += rows.map(function (r) {
-      var k = String(r.Etat_Liquidation || "(sans état)");
-      return '<div class="row' + (activeId === r.id ? ' active' : '') + '" data-id="' + r.id + '">' +
+            '<span class="ct"><span class="cnt">' + total + '</span><span class="amt">' + euro.format(somme) + " €</span></span></div>";
+    h += ORDER.map(function (k) {
+      return '<div class="row' + (activeKey === k ? ' active' : '') + '" data-k="' + k.replace(/"/g, "&quot;") + '">' +
         '<span class="dot" style="background:' + (COLORS[k] || "#744EC2") + '"></span>' +
         '<span class="lb">' + k.replace(/</g, "&lt;") + '</span>' +
-        '<span class="ct"><b>' + (r.count || 0) + '</b> · ' + euro.format(r.Montant_TTC || 0) + " €</span></div>";
+        '<span class="ct"><span class="cnt">' + GROUPS[k].n + '</span><span class="amt">' + euro.format(GROUPS[k].sum) + " €</span></span></div>";
     }).join("");
     list.innerHTML = h;
     Array.prototype.forEach.call(list.children, function (el) {
       el.onclick = function () {
-        var v = el.getAttribute("data-id");
-        apply(v === "" ? null : parseInt(v, 10));
+        var v = el.getAttribute("data-k");
+        apply(v === "" ? null : v);
       };
     });
   }
@@ -91,8 +104,7 @@
       var msg = JSON.parse(raw);
       localStorage.removeItem(LS_KEY);
       if (!msg || (Date.now() - (msg.ts || 0)) > 20000) return; // périmé
-      var hit = DATA.find(function (r) { return String(r.Etat_Liquidation || "") === msg.etat; });
-      if (hit) apply(hit.id);
+      if (GROUPS[msg.etat]) apply(msg.etat);
     } catch (e) {}
   }
 
@@ -101,9 +113,9 @@
     if (!window.grist) { document.getElementById("list").textContent = "grist-plugin-api.js introuvable."; return; }
     grist.ready({ requiredAccess: "read table", allowSelectBy: true });
     grist.onRecords(function (records) {
-      DATA = records || [];
+      rebuild(records);
       if (first) { first = false; render(); consumePending(); }
-      else render();
+      else { if (activeKey != null && GROUPS[activeKey]) apply(activeKey); else render(); }
     });
     window.addEventListener("storage", function (e) { if (e.key === LS_KEY) consumePending(); });
   }
