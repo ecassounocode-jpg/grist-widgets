@@ -105,7 +105,8 @@
     (records || []).forEach(function (r) {
       var k = (r.Etat_Liquidation == null || r.Etat_Liquidation === "") ? "(sans état)" : String(r.Etat_Liquidation);
       if (!groups[k]) { groups[k] = { n: 0, sum: 0 }; order.push(k); }
-      groups[k].n += 1;
+      // Source agrégée (table de synthèse) : "count" = nombre de factures ; sinon 1 par ligne.
+      groups[k].n += (typeof r.count === "number" ? r.count : 1);
       groups[k].sum += (typeof r.Montant_TTC === "number" ? r.Montant_TTC : 0);
     });
     order.sort(function (a, b) { return groups[b].n - groups[a].n; });
