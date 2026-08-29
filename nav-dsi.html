@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Navigation — tableau de bord DSI</title>
+<!--
+  Widget Grist : bandeau de navigation entre les pages du tableau de bord (style Power BI).
+  Ville de Roubaix — DSI — Suivi budget & factures CNF
+
+  UTILISATION :
+  - Héberger ce fichier à côté de pie-dsi.html (GitHub Pages / GitLab Pages).
+  - Dans Grist : Ajouter une vue à la page > Personnalisée > URL de ce fichier.
+    Aucun accès aux données n'est nécessaire (choisir « Aucun »).
+  - Paramètre optionnel dans l'URL : ?active=8 pour surligner la page courante
+    (ex. sur la page Synthèse : .../nav-dsi.html?active=8).
+  - Hauteur conseillée du widget : ~56 px.
+-->
+<script>
+  var DOC_BASE = "http://10.210.0.47:8484/o/docs/q6Ddhj3FdJ9F/SuivibudgetDSI2026CNF2026-08-29";
+  var PAGES = [
+    { p: 8,  label: "Synthèse",          icon: "&#127968;" },
+    { p: 9,  label: "Budget",            icon: "&#128202;" },
+    { p: 14, label: "Soldes par compte", icon: "&#129518;" },
+    { p: 10, label: "Factures",          icon: "&#129534;" },
+    { p: 11, label: "Engagements & BC",  icon: "&#128221;" },
+    { p: 12, label: "Marchés",           icon: "&#128193;" },
+    { p: 13, label: "Fournisseurs",      icon: "&#127970;" }
+  ];
+</script>
+<style>
+  :root { color-scheme: light; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: #252423; /* anthracite Power BI */
+    font-family: "Segoe UI", -apple-system, Roboto, Arial, sans-serif;
+    overflow: hidden;
+  }
+  #bar {
+    display: flex; align-items: stretch; height: 100%;
+    padding: 0 8px; gap: 2px; overflow-x: auto; overflow-y: hidden;
+  }
+  .tab {
+    display: flex; align-items: center; gap: 7px;
+    padding: 0 14px; cursor: pointer; white-space: nowrap;
+    color: #d2d0ce; font-size: 13px; border: none; background: none;
+    border-bottom: 3px solid transparent; border-top: 3px solid transparent;
+    transition: background .12s, color .12s;
+  }
+  .tab:hover { background: #3b3a39; color: #ffffff; }
+  .tab.active {
+    color: #ffffff; font-weight: 600;
+    border-bottom-color: #F2C811; /* jaune Power BI */
+    background: #323130;
+  }
+  .tab .ic { font-size: 15px; line-height: 1; }
+  #brand {
+    display: flex; align-items: center; margin-right: 10px; padding: 0 10px 0 4px;
+    color: #F2C811; font-weight: 700; font-size: 13px; letter-spacing: .3px;
+    border-right: 1px solid #3b3a39; white-space: nowrap;
+  }
+  @media (max-width: 640px) { .tab .lb { display: none; } .tab { padding: 0 10px; } }
+</style>
+</head>
+<body>
+<nav id="bar" aria-label="Navigation du tableau de bord"></nav>
+<script>
+(function () {
+  "use strict";
+  var qs = new URLSearchParams(window.location.search);
+  var active = parseInt(qs.get("active") || "0", 10);
+
+  var bar = document.getElementById("bar");
+  var brand = document.createElement("div");
+  brand.id = "brand";
+  brand.textContent = "BUDGET DSI 2026";
+  bar.appendChild(brand);
+
+  PAGES.forEach(function (pg) {
+    var b = document.createElement("button");
+    b.className = "tab" + (pg.p === active ? " active" : "");
+    b.innerHTML = '<span class="ic">' + pg.icon + '</span><span class="lb">' + pg.label + '</span>';
+    b.title = pg.label;
+    b.addEventListener("click", function () {
+      var url = DOC_BASE + "/p/" + pg.p;
+      try { window.top.location.href = url; }
+      catch (e) { window.open(url, "_blank"); }
+    });
+    bar.appendChild(b);
+  });
+})();
+</script>
+</body>
+</html>
