@@ -20,6 +20,10 @@
 -->
 <script>
   var FACTURES_URL = "http://10.210.0.47:8484/o/docs/q6Ddhj3FdJ9F/SuivibudgetDSI2026CNF2026-08-29/p/10";
+  // Ancre de filtrage : id du widget « Par état de liquidation » sur la page Factures
+  // et colRef d'une de ses colonnes (voir journal). Cliquer une part sélectionne la ligne
+  // correspondante, ce qui filtre « Toutes les factures » (widgets liés).
+  var ANCHOR_SECTION = 34, ANCHOR_COL = 136;
 </script>
 <script src="grist-plugin-api.js"></script>
 <script>
@@ -36,7 +40,9 @@
     height: 100%; padding: 8px 16px; box-sizing: border-box; flex-wrap: nowrap; }
   /* Le camembert s'adapte à la hauteur disponible du widget (jamais tronqué) */
   #chart { flex: 0 0 auto; cursor: pointer;
-    width: min(230px, calc(100vh - 20px)); height: min(230px, calc(100vh - 20px)); }
+    width: min(230px, calc(100vh - 40px)); height: min(230px, calc(100vh - 40px)); }
+  /* Widget peu haut : on masque la ligne d'astuce pour garder légende + camembert entiers */
+  @media (max-height: 215px) { #hint { display: none; } }
   #legend { flex: 0 1 auto; font-size: 13px; }
   .lrow { display: flex; align-items: center; gap: 8px; padding: 3px 4px;
     border-radius: 4px; cursor: pointer; white-space: nowrap; }
@@ -55,7 +61,7 @@
        aria-label="Répartition des factures par état"></svg>
   <div id="legendbox">
     <div id="legend"></div>
-    <div id="hint">&#128070; Cliquer sur une part ou une ligne ouvre la page Factures</div>
+    <div id="hint">&#128070; Cliquer sur une part ouvre la page Factures filtrée sur cet état</div>
   </div>
 </div>
 <script>
@@ -82,9 +88,11 @@
     return COLORS[label];
   }
 
-  function openFactures() {
-    try { window.top.location.href = FACTURES_URL; }
-    catch (e) { window.open(FACTURES_URL, "_blank"); }
+  function openFactures(rowId) {
+    var url = FACTURES_URL;
+    if (rowId) url += "#a1.s" + ANCHOR_SECTION + ".r" + rowId + ".c" + ANCHOR_COL;
+    try { window.top.location.href = url; }
+    catch (e) { window.open(url, "_blank"); }
   }
 
   function polar(cx, cy, r, a) { // a en radians, 0 = haut, sens horaire
@@ -107,7 +115,7 @@
     var groups = {}, order = [];
     (records || []).forEach(function (r) {
       var k = (r.Etat_Liquidation == null || r.Etat_Liquidation === "") ? "(sans état)" : String(r.Etat_Liquidation);
-      if (!groups[k]) { groups[k] = { n: 0, sum: 0 }; order.push(k); }
+      if (!groups[k]) { groups[k] = { n: 0, sum: 0, rowId: r.id }; order.push(k); }
       // Source agrégée (table de synthèse) : "count" = nombre de factures ; sinon 1 par ligne.
       groups[k].n += (typeof r.count === "number" ? r.count : 1);
       groups[k].sum += (typeof r.Montant_TTC === "number" ? r.Montant_TTC : 0);
@@ -136,7 +144,7 @@
       el.setAttribute("fill", colorFor(k));
       el.setAttribute("stroke", "#fff");
       el.setAttribute("stroke-width", "2");
-      el.addEventListener("click", openFactures);
+      el.addEventListener("click", function () { openFactures(groups[k].rowId); });
       var t = document.createElementNS(NS, "title");
       t.textContent = k + " : " + groups[k].n + " facture(s), " + fmtEuro.format(groups[k].sum) + " €";
       el.appendChild(t);
@@ -155,7 +163,7 @@
 
       var row = document.createElement("div");
       row.className = "lrow";
-      row.addEventListener("click", openFactures);
+      row.addEventListener("click", function () { openFactures(groups[k].rowId); });
       row.innerHTML =
         '<span class="sw" style="background:' + colorFor(k) + '"></span>' +
         '<span class="lbl">' + k.replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</span>' +
