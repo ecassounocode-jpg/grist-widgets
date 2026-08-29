@@ -16,7 +16,10 @@
   - Hauteur conseillée du widget : ~56 px.
 -->
 <script>
-  var DOC_BASE = "http://10.210.0.47:8484/o/docs/q6Ddhj3FdJ9F/SuivibudgetDSI2026CNF2026-08-29";
+  // AUCUNE URL codée en dur : le widget détecte tout seul le document Grist qui
+  // l'héberge (grist.getAccessToken → origine + id du document). Surcharge possible
+  // via ?base=<url encodée du document> si besoin. Nécessite un accès en lecture.
+  var DOC_BASE = new URLSearchParams(window.location.search).get("base") || null;
   var PAGES = [
     { p: 8,  label: "Synthèse",          icon: "&#127968;" },
     { p: 9,  label: "Budget",            icon: "&#128202;" },
@@ -72,6 +75,23 @@
   var qs = new URLSearchParams(window.location.search);
   var active = parseInt(qs.get("active") || "0", 10);
 
+  // Découverte de l'URL du document hôte (une seule fois, mise en cache)
+  var basePromise = null;
+  function getBase() {
+    if (DOC_BASE) return Promise.resolve(DOC_BASE);
+    if (!basePromise) {
+      basePromise = (window.grist && grist.getAccessToken
+        ? grist.getAccessToken({ readOnly: true }).then(function (t) {
+            var parts = String(t.baseUrl).split("/api/docs/");
+            DOC_BASE = parts[0] + "/" + parts[1].split("/")[0];
+            return DOC_BASE;
+          }).catch(function () { return null; })
+        : Promise.resolve(null));
+    }
+    return basePromise;
+  }
+  if (window.grist) { try { grist.ready({ requiredAccess: "read table" }); } catch (e) {} }
+
   var bar = document.getElementById("bar");
   var brand = document.createElement("div");
   brand.id = "brand";
@@ -84,9 +104,12 @@
     b.innerHTML = '<span class="ic">' + pg.icon + '</span><span class="lb">' + pg.label + '</span>';
     b.title = pg.label;
     b.addEventListener("click", function () {
-      var url = DOC_BASE + "/p/" + pg.p;
-      try { window.top.location.href = url; }
-      catch (e) { window.open(url, "_blank"); }
+      getBase().then(function (b0) {
+        if (!b0) return; // document hôte inconnu : on ne navigue pas
+        var url = b0 + "/p/" + pg.p;
+        try { window.top.location.href = url; }
+        catch (e) { window.open(url, "_blank"); }
+      });
     });
     bar.appendChild(b);
   });

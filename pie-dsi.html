@@ -10,7 +10,8 @@
   DÉPLOIEMENT (GitLab Pages ou tout serveur web servant du text/html) :
   1. Déposer ce fichier tel quel dans le dépôt (ex. public/pie-dsi.html pour GitLab Pages).
   2. (Recommandé) Déposer à côté le fichier grist-plugin-api.js, téléchargeable depuis
-     http://localhost:8585/grist-plugin-api.js — le widget fonctionne alors sans internet.
+     votre instance Grist (<url-de-votre-grist>/grist-plugin-api.js) — le widget
+     fonctionne alors sans internet.
      Sinon, la copie en ligne https://docs.getgrist.com/grist-plugin-api.js est utilisée.
   3. Dans Grist : widget « Personnalisée » > URL = l'adresse publique de ce fichier,
      Accès = « Lire la table sélectionnée », source de données = table Factures.
@@ -19,7 +20,12 @@
   RÉGLAGE : l'URL ouverte au clic (page Factures du document Grist) :
 -->
 <script>
-  var FACTURES_URL = "http://10.210.0.47:8484/o/docs/q6Ddhj3FdJ9F/SuivibudgetDSI2026CNF2026-08-29/p/10";
+  // AUCUNE URL codée en dur : le widget détecte le document Grist qui l'héberge
+  // (grist.getAccessToken). Surcharges possibles : ?base=<url du document> et
+  // ?page=<n° de la page Factures> (défaut 10).
+  var QS = new URLSearchParams(window.location.search);
+  var BASE_OVERRIDE = QS.get("base") || null;
+  var PAGE_FACTURES = QS.get("page") || "10";
   // Filtrage au clic : l'état cliqué est déposé dans localStorage (partagé avec le
   // sélecteur etats-dsi.html, même origine GitHub Pages) qui l'applique à l'arrivée.
   var LS_KEY = "dsiEtatFiltre";
@@ -87,13 +93,31 @@
     return COLORS[label];
   }
 
+  var basePromise = null;
+  function getBase() {
+    if (BASE_OVERRIDE) return Promise.resolve(BASE_OVERRIDE);
+    if (!basePromise) {
+      basePromise = (window.grist && grist.getAccessToken
+        ? grist.getAccessToken({ readOnly: true }).then(function (t) {
+            var parts = String(t.baseUrl).split("/api/docs/");
+            return parts[0] + "/" + parts[1].split("/")[0];
+          }).catch(function () { return null; })
+        : Promise.resolve(null));
+    }
+    return basePromise;
+  }
+
   function openFactures(etat) {
     if (etat) {
       try { localStorage.setItem(LS_KEY, JSON.stringify({ etat: String(etat), ts: Date.now() })); }
       catch (e) {}
     }
-    try { window.top.location.href = FACTURES_URL; }
-    catch (e) { window.open(FACTURES_URL, "_blank"); }
+    getBase().then(function (b) {
+      if (!b) return; // document hôte inconnu : on ne navigue pas
+      var url = b + "/p/" + PAGE_FACTURES;
+      try { window.top.location.href = url; }
+      catch (e) { window.open(url, "_blank"); }
+    });
   }
 
   function polar(cx, cy, r, a) { // a en radians, 0 = haut, sens horaire

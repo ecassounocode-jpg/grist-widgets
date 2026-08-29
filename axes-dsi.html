@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Top des axes budgétés — barres cumulées</title>
+<!--
+  Widget Grist : top des axes budgétés en barres cumulées (style Power BI).
+  Pour chaque axe : Mandaté (orange) + Eng. non soldés (vert) empilés,
+  le reste jusqu'au Budgété en gris clair ; taux de réalisation à droite.
+
+  - Source : table Lignes_Budget, accès « Lire la table sélectionnée ».
+  - Aucune URL codée en dur ; paramètre optionnel ?top=<n> (défaut 5).
+  - Colonnes attendues : Axe (ou Axe_court2), Budgete, Mandate, ENS.
+-->
+<script src="grist-plugin-api.js"></script>
+<script>
+  if (!window.grist) {
+    document.write('<script src="https://docs.getgrist.com/grist-plugin-api.js"><\/script>');
+  }
+</script>
+<style>
+  :root { color-scheme: light; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+    font-family: "Segoe UI", -apple-system, Roboto, Arial, sans-serif; color: #252423; background: #fff; }
+  #wrap { height: 100%; display: flex; flex-direction: column; padding: 6px 10px 8px; box-sizing: border-box; }
+  #legend { display: flex; gap: 16px; justify-content: flex-end; font-size: 11px; color: #605E5C;
+    padding: 0 2px 6px; flex: 0 0 auto; }
+  #legend .it { display: inline-flex; align-items: center; gap: 5px; }
+  #legend .sw { width: 10px; height: 10px; border-radius: 2px; }
+  #rows { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: space-evenly;
+    overflow-y: auto; gap: 4px; }
+  .r { display: flex; align-items: center; gap: 10px; min-height: 24px; }
+  .lb { flex: 0 0 170px; font-size: 12px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; text-align: right; color: #3b3a39; }
+  .barbox { flex: 1 1 auto; }
+  .bar { display: flex; height: 16px; border-radius: 3px; overflow: hidden; background: transparent; }
+  .seg { height: 100%; }
+  .seg.m { background: #E66C37; }           /* Mandaté */
+  .seg.e { background: #1AAB40; }           /* Eng. non soldés */
+  .seg.d { background: #EDEBE9; }           /* reste jusqu'au Budgété */
+  .pct { flex: 0 0 62px; font-size: 12px; font-weight: 600; text-align: right;
+    font-variant-numeric: tabular-nums; }
+  .pct.warn { color: #E66C37; }
+  .pct.crit { color: #D13438; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="legend">
+    <span class="it"><span class="sw" style="background:#E66C37"></span>Mandaté</span>
+    <span class="it"><span class="sw" style="background:#1AAB40"></span>Eng. non soldés</span>
+    <span class="it"><span class="sw" style="background:#EDEBE9"></span>Reste budgété</span>
+  </div>
+  <div id="rows"></div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var TOP = parseInt(new URLSearchParams(window.location.search).get("top") || "5", 10);
+  var euro = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
+  var pct  = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+
+  function render(records) {
+    var groups = {}, order = [];
+    (records || []).forEach(function (r) {
+      var k = String(r.Axe_court2 || r.Axe_court || r.Axe || "(sans axe)");
+      if (!groups[k]) { groups[k] = { bud: 0, man: 0, ens: 0 }; order.push(k); }
+      groups[k].bud += r.Budgete || 0;
+      groups[k].man += r.Mandate || 0;
+      groups[k].ens += r.ENS || 0;
+    });
+    order.sort(function (a, b) { return groups[b].bud - groups[a].bud; });
+    var top = order.filter(function (k) { return groups[k].bud > 0; }).slice(0, TOP);
+    var maxBud = top.reduce(function (m, k) { return Math.max(m, groups[k].bud); }, 0) || 1;
+
+    document.getElementById("rows").innerHTML = top.map(function (k) {
+      var g = groups[k];
+      var engage = g.man + g.ens;
+      var scale = Math.max(g.bud, engage);            // si dépassement, on montre tout
+      var wTotal = (scale / Math.max(maxBud, scale)) * 100;   // longueur comparable entre axes
+      var wm = scale ? (g.man / scale) * wTotal : 0;
+      var we = scale ? (g.ens / scale) * wTotal : 0;
+      var wd = Math.max(0, wTotal - wm - we);          // reste jusqu'au budgété
+      var taux = g.bud ? (engage / g.bud) * 100 : 0;
+      var cls = taux >= 100 ? " crit" : (taux > 90 ? " warn" : "");
+      var tip = k + "\nBudgété : " + euro.format(g.bud) + " €\nMandaté : " + euro.format(g.man) +
+                " €\nEng. non soldés : " + euro.format(g.ens) + " €\nEngagé : " + pct.format(taux) + " %";
+      return '<div class="r" title="' + tip.replace(/"/g, "&quot;") + '">' +
+        '<span class="lb">' + k.replace(/</g, "&lt;") + '</span>' +
+        '<span class="barbox"><span class="bar">' +
+          '<span class="seg m" style="width:' + wm + '%"></span>' +
+          '<span class="seg e" style="width:' + we + '%"></span>' +
+          '<span class="seg d" style="width:' + wd + '%"></span>' +
+        '</span></span>' +
+        '<span class="pct' + cls + '">' + pct.format(taux) + ' %</span></div>';
+    }).join("");
+  }
+
+  function start() {
+    if (!window.grist) { document.getElementById("rows").textContent = "grist-plugin-api.js introuvable."; return; }
+    grist.ready({ requiredAccess: "read table" });
+    grist.onRecords(function (records) { render(records || []); });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+})();
+</script>
+</body>
+</html>
