@@ -30,10 +30,13 @@
 <style>
   :root { color-scheme: light; }
   html, body { margin: 0; padding: 0; height: 100%; background: #fff;
-    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #262633; }
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #262633;
+    overflow: hidden; }
   #wrap { display: flex; align-items: center; justify-content: center; gap: 28px;
-    height: 100%; padding: 8px 16px; box-sizing: border-box; flex-wrap: wrap; }
-  #chart { flex: 0 1 auto; cursor: pointer; }
+    height: 100%; padding: 8px 16px; box-sizing: border-box; flex-wrap: nowrap; }
+  /* Le camembert s'adapte à la hauteur disponible du widget (jamais tronqué) */
+  #chart { flex: 0 0 auto; cursor: pointer;
+    width: min(230px, calc(100vh - 20px)); height: min(230px, calc(100vh - 20px)); }
   #legend { flex: 0 1 auto; font-size: 13px; }
   .lrow { display: flex; align-items: center; gap: 8px; padding: 3px 4px;
     border-radius: 4px; cursor: pointer; white-space: nowrap; }
