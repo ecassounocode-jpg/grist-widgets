@@ -25,6 +25,12 @@
   // N° de la page Reports : varie selon le document (l'id de vue est attribué à la
   // création). Surcharge : ?reports=<n> dans l'URL du widget (défaut 15).
   var REPORTS_PAGE = parseInt(QS0.get("reports") || "15", 10);
+  // Onglets additionnels : ?tabs=<page>|<libellé>|<icône emoji>,<page>|<libellé>|<icône>…
+  // (icône facultative). Permet d'ajouter des pages sans modifier ce fichier.
+  var EXTRA_TABS = (QS0.get("tabs") || "").split(",").filter(Boolean).map(function (t) {
+    var p = t.split("|");
+    return { p: parseInt(p[0], 10), label: p[1] || ("Page " + p[0]), icon: p[2] || "\uD83D\uDCC4" };
+  });
   var PAGES = [
     { p: 8,  label: "Synthèse",          icon: "&#127968;" },
     { p: 9,  label: "Budget",            icon: "&#128202;" },
@@ -151,6 +157,7 @@
   brand.appendChild(dot);
   bar.appendChild(brand);
 
+  EXTRA_TABS.forEach(function (t) { PAGES.push(t); });
   PAGES.forEach(function (pg) {
     var b = document.createElement("button");
     b.className = "tab" + (pg.p === active ? " active" : "");
