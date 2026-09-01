@@ -10,7 +10,8 @@
   UTILISATION :
   - Héberger ce fichier à côté de pie-dsi.html (GitHub Pages / GitLab Pages).
   - Dans Grist : Ajouter une vue à la page > Personnalisée > URL de ce fichier.
-    Aucun accès aux données n'est nécessaire (choisir « Aucun »).
+    Accès requis : « Lire la table sélectionnée » (sert uniquement à détecter
+    l'URL du document hôte — aucune donnée n'est lue).
   - Paramètre optionnel dans l'URL : ?active=8 pour surligner la page courante
     (ex. sur la page Synthèse : .../nav-dsi.html?active=8).
   - Hauteur conseillée du widget : ~56 px.
@@ -27,8 +28,16 @@
     { p: 10, label: "Factures",          icon: "&#129534;" },
     { p: 11, label: "Engagements & BC",  icon: "&#128221;" },
     { p: 12, label: "Marchés",           icon: "&#128193;" },
-    { p: 13, label: "Fournisseurs",      icon: "&#127970;" }
+    { p: 13, label: "Fournisseurs",      icon: "&#127970;" },
+    { p: 15, label: "Reports",           icon: "&#128257;" }
   ];
+</script>
+<!-- API Grist : indispensable pour l'auto-détection du document hôte -->
+<script src="grist-plugin-api.js"></script>
+<script>
+  if (!window.grist) {
+    document.write('<script src="https://docs.getgrist.com/grist-plugin-api.js"><\/script>');
+  }
 </script>
 <style>
   :root { color-scheme: light; }
@@ -91,6 +100,11 @@
     return basePromise;
   }
   if (window.grist) { try { grist.ready({ requiredAccess: "read table" }); } catch (e) {} }
+  // Pré-chargement : l'URL du document est connue AVANT le premier clic
+  // (la navigation reste alors dans le délai d'activation utilisateur du navigateur).
+  getBase().then(function (b) {
+    if (!b) console.warn("nav-dsi : document hôte non détecté (grist-plugin-api absent ou accès insuffisant).");
+  });
 
   var bar = document.getElementById("bar");
   var brand = document.createElement("div");

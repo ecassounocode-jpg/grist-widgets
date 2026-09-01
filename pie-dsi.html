@@ -205,6 +205,10 @@
     }
     grist.ready({ requiredAccess: "read table" });
     grist.onRecords(function (records) { render(records || []); });
+    // Pré-chargement de l'URL du document : le clic navigue sans attendre l'API
+    getBase().then(function (b) {
+      if (!b) console.warn("pie-dsi : document hôte non détecté (accès « read table » requis).");
+    });
   }
 
   if (document.readyState === "loading") {
