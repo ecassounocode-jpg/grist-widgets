@@ -49,6 +49,15 @@
   td.warn { color: #E66C37; font-weight: 600; }
   td.crit { color: #D13438; font-weight: 600; }
   .nm { color: #8A8886; font-style: italic; }
+  tr.grp { cursor: pointer; }
+  .chev { display: inline-block; width: 12px; color: #605E5C; font-size: 11px; }
+  tr.sub td { background: #FFFFFF; border-bottom: 1px dotted #EDEBE9; font-size: 12px; color: #3b3a39; }
+  tr.sub .subl { padding-left: 34px; max-width: 380px; }
+  tr.sub .obj { color: #8A8886; }
+  .stx { display: inline-block; padding: 0 7px; border-radius: 8px; font-size: 10.5px; font-weight: 600; }
+  .st-R { background: #DFF6DD; color: #107C10; }   /* Renouvelé */
+  .st-À { background: #FFF4CE; color: #8A6A00; }  /* À renouveler */
+  .st-E { background: #EFF6FC; color: #118DFF; }   /* En cours */
   tfoot td { padding: 6px 10px; font-weight: 600; border-top: 2px solid #C8C6C4; background: #F3F2F1;
     position: sticky; bottom: 0; font-variant-numeric: tabular-nums; }
   tfoot td.num { text-align: right; }
@@ -101,10 +110,12 @@
   function render() {
     if (!CONTRATS.length || !LIGNES) return;
     // index des lignes budgétaires : gestionnaire|nature[|opération]
+    // Dans l'état 189, Gestionnaire = l'enveloppe (D100/I261/D300).
+    // Clé de rapprochement : enveloppe + nature [+ opération].
     var byKey = {};
     var n = LIGNES.id.length;
     for (var i = 0; i < n; i++) {
-      var g = String(LIGNES.Gestionnaire ? LIGNES.Gestionnaire[i] : "").trim();
+      var g = String(LIGNES.Gestionnaire ? LIGNES.Gestionnaire[i] : "").trim().toUpperCase();
       var na = String(LIGNES.Nature ? LIGNES.Nature[i] : "").trim();
       var op = String(LIGNES.Operation ? LIGNES.Operation[i] : "").trim();
       var rec = { lib: (LIGNES.Libelle_Complet ? LIGNES.Libelle_Complet[i] : na), bud: (LIGNES.Budgete ? LIGNES.Budgete[i] : 0) || 0 };
@@ -116,13 +127,16 @@
       if (r.Renouvellement === "Non renouvelé") { totEco += prix; return; }
       if (r.Renouvellement === "Renouvelé") totRen += prix; else totAtt += prix;
       nbProj++;
-      var tk = tokens(r.Imputation);        // [enveloppe, gestionnaire, nature, opération?]
+      var tk = tokens(r.Imputation);        // [enveloppe, service, nature, opération?]
+      var env = (tk[0] || String(r.Enveloppe || "")).toUpperCase();
       var rec = null;
-      if (tk.length >= 3) rec = byKey[tk[1] + "|" + tk[2] + "|" + (tk[3] || "")] || byKey[tk[1] + "|" + tk[2]] || null;
+      if (env && tk.length >= 3)
+        rec = byKey[env + "|" + tk[2] + "|" + (tk[3] || "")] || byKey[env + "|" + tk[2]] || null;
       var key = rec ? "L:" + rec.lib : (tk.length ? "I:" + tk.join(" ") : "I:(sans imputation)");
       if (!groups[key]) groups[key] = { lib: rec ? rec.lib : (tk.length ? tk.join(" ") : "(sans imputation)"),
-        matched: !!rec, bud: rec ? rec.bud : 0, sum: 0, nb: 0 };
+        matched: !!rec, bud: rec ? rec.bud : 0, sum: 0, nb: 0, items: [] };
       groups[key].sum += prix; groups[key].nb++;
+      groups[key].items.push({ f: r.Fournisseur || "", o: r.Objet || "", p: prix, st: r.Renouvellement || "" });
     });
     var keys = Object.keys(groups).sort(function (a, b) { return groups[b].sum - groups[a].sum; });
 
@@ -134,17 +148,36 @@
     document.getElementById("vEco").textContent = fe(totEco);
 
     var sumBud = 0;
-    document.getElementById("body").innerHTML = keys.map(function (k) {
+    var html = keys.map(function (k, gi) {
       var g = groups[k]; sumBud += g.bud;
       var poids = g.bud ? (g.sum / g.bud) * 100 : null;
       var cls = poids == null ? "" : (poids >= 100 ? " crit" : (poids > 90 ? " warn" : ""));
-      return "<tr><td class=\"lib" + (g.matched ? "" : " nm") + "\" title=\"" + g.lib.replace(/"/g, "&quot;") + "\">" +
+      g.items.sort(function (a, b) { return b.p - a.p; });
+      var subs = g.items.map(function (it) {
+        return '<tr class="sub g' + gi + '" hidden><td class="lib subl" title="' +
+          (it.f + " — " + it.o).replace(/"/g, "&quot;") + '">' +
+          it.f.replace(/</g, "&lt;") + ' <span class="obj">— ' + it.o.replace(/</g, "&lt;") + "</span></td>" +
+          '<td class="num"><span class="stx st-' + it.st.charAt(0) + '">' + it.st.replace(/</g, "&lt;") + "</span></td>" +
+          '<td class="num">' + fe(it.p) + "</td><td></td><td></td></tr>";
+      }).join("");
+      return '<tr class="grp" data-g="' + gi + '"><td class="lib' + (g.matched ? "" : " nm") + '" title="' + g.lib.replace(/"/g, "&quot;") + '">' +
+        '<span class="chev">&#9656;</span> ' +
         (g.matched ? "" : "&#9888;&#65039; ") + g.lib.replace(/</g, "&lt;") + "</td>" +
         '<td class="num">' + g.nb + "</td>" +
         '<td class="num">' + fe(g.sum) + "</td>" +
         '<td class="num">' + (g.matched ? fe(g.bud) : "—") + "</td>" +
-        '<td class="num' + cls + '">' + (poids == null ? "—" : pct.format(poids) + " %") + "</td></tr>";
+        '<td class="num' + cls + '">' + (poids == null ? "—" : pct.format(poids) + " %") + "</td></tr>" + subs;
     }).join("");
+    var body = document.getElementById("body");
+    body.innerHTML = html;
+    Array.prototype.forEach.call(body.querySelectorAll("tr.grp"), function (tr) {
+      tr.addEventListener("click", function () {
+        var gi = tr.getAttribute("data-g");
+        var open = tr.classList.toggle("open");
+        tr.querySelector(".chev").innerHTML = open ? "&#9662;" : "&#9656;";
+        Array.prototype.forEach.call(body.querySelectorAll("tr.sub.g" + gi), function (x) { x.hidden = !open; });
+      });
+    });
     document.getElementById("foot").innerHTML =
       "<td>Total</td><td class=\"num\">" + nbProj + "</td>" +
       '<td class="num">' + fe(tot) + "</td>" +
