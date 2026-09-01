@@ -111,7 +111,26 @@
       .catch(function (e) {
         lastErr = "getAccessToken refusé : " + (e && e.message || e); setState("err");
         return null;
-      });
+      })
+      .then(function (b) { return b || fallbackBase(); });
+  }
+  // Plan B sans jeton d'accès : origine du site hôte via le référent du navigateur
+  // + identifiant du document via getDocName (même canal que la lecture des données).
+  // Convient aux déploiements mono-organisation (/o/docs/...), c.-à-d. l'auto-hébergement type.
+  function fallbackBase() {
+    var org = null;
+    try { org = document.referrer ? new URL(document.referrer).origin : null; } catch (e) {}
+    if (!org || !window.grist || !grist.docApi || !grist.docApi.getDocName) return null;
+    return grist.docApi.getDocName().then(function (name) {
+      if (!name) return null;
+      DOC_BASE = org + "/o/docs/" + name;
+      lastErr = null; setState("ok");
+      return DOC_BASE;
+    }).catch(function (e) {
+      lastErr = (lastErr ? lastErr + " ; " : "") + "getDocName refusé : " + (e && e.message || e);
+      setState("err");
+      return null;
+    });
   }
   function setState(st) {
     var dot = document.getElementById("st");

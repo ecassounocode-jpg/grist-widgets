@@ -93,18 +93,37 @@
     return COLORS[label];
   }
 
-  var basePromise = null;
+  var DOC_BASE = null;
   function getBase() {
     if (BASE_OVERRIDE) return Promise.resolve(BASE_OVERRIDE);
-    if (!basePromise) {
-      basePromise = (window.grist && grist.getAccessToken
-        ? grist.getAccessToken({ readOnly: true }).then(function (t) {
-            var parts = String(t.baseUrl).split("/api/docs/");
-            return parts[0] + "/" + parts[1].split("/")[0];
-          }).catch(function () { return null; })
-        : Promise.resolve(null));
-    }
-    return basePromise;
+    if (DOC_BASE) return Promise.resolve(DOC_BASE);   // succès mis en cache ; échec jamais
+    if (!window.grist || !grist.getAccessToken) return Promise.resolve(fallbackBase());
+    var timeout = new Promise(function (res) { setTimeout(function () { res(null); }, 4000); });
+    return Promise.race([grist.getAccessToken({ readOnly: true }), timeout])
+      .then(function (t) {
+        if (!t || !t.baseUrl) return null;
+        var parts = String(t.baseUrl).split("/api/docs/");
+        if (parts.length < 2) return null;
+        DOC_BASE = parts[0] + "/" + parts[1].split("/")[0];
+        return DOC_BASE;
+      })
+      .catch(function () { return null; })
+      .then(function (b) { return b || fallbackBase(); });
+  }
+  // Plan B sans jeton : origine du site hôte (référent) + identifiant du document
+  // (getDocName, même canal que la lecture des données). Déploiements mono-organisation.
+  function fallbackBase() {
+    var org = null;
+    try { org = document.referrer ? new URL(document.referrer).origin : null; } catch (e) {}
+    if (!org || !window.grist || !grist.docApi || !grist.docApi.getDocName) return null;
+    return grist.docApi.getDocName().then(function (name) {
+      if (!name) return null;
+      DOC_BASE = org + "/o/docs/" + name;
+      return DOC_BASE;
+    }).catch(function (e) {
+      try { console.warn("pie-dsi : document hôte non détecté —", e && e.message || e); } catch (x) {}
+      return null;
+    });
   }
 
   function openFactures(etat) {
