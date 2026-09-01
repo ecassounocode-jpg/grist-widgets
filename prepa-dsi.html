@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Prépa budgétaire N+1 — projection par ligne</title>
+<!--
+  Widget Grist : projection budgétaire N+1 à partir des contrats récurrents.
+  - Source liée : table Contrats. Accès requis : « Accès complet » (le widget lit aussi
+    la table Lignes_Budget pour comparer au budgété de l'exercice en cours).
+  - Les contrats « Non renouvelé » sont exclus de la projection.
+  - Rapprochement contrat -> ligne budgétaire par l'imputation (gestionnaire + nature
+    [+ opération]) ; les imputations non reconnues sont regroupées à part.
+  - Paramètre optionnel : ?annee=2027 (libellés uniquement).
+  - Aucune URL codée en dur.
+-->
+<script src="grist-plugin-api.js"></script>
+<script>
+  if (!window.grist) {
+    document.write('<script src="https://docs.getgrist.com/grist-plugin-api.js"><\/script>');
+  }
+</script>
+<style>
+  :root { color-scheme: light; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+    font-family: "Segoe UI", -apple-system, Roboto, Arial, sans-serif; color: #252423; background: #fff; }
+  #wrap { height: 100%; display: flex; flex-direction: column; box-sizing: border-box; padding: 8px 12px; gap: 8px; }
+  #cards { display: flex; gap: 10px; flex: 0 0 auto; }
+  .card { flex: 1 1 0; border: 1px solid #E1DFDD; border-radius: 6px; border-top: 3px solid #118DFF;
+    padding: 8px 12px 9px; min-width: 0; }
+  .card.tot { border-top-color: #F2C811; }
+  .card.ren { border-top-color: #107C10; }
+  .card.att { border-top-color: #E66C37; }
+  .card.eco { border-top-color: #605E5C; }
+  .card .t { font-size: 10.5px; text-transform: uppercase; letter-spacing: .4px; color: #605E5C;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .v { font-size: 21px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .card .s { font-size: 11px; color: #8A8886; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #box { flex: 1 1 auto; overflow: auto; border-top: 1px solid #EDEBE9; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  thead th { position: sticky; top: 0; background: #F3F2F1; font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .3px; padding: 6px 10px; border-bottom: 2px solid #C8C6C4;
+    white-space: nowrap; text-align: left; z-index: 1; }
+  thead th.num { text-align: right; }
+  tbody td { padding: 5px 10px; border-bottom: 1px solid #EDEBE9; white-space: nowrap; }
+  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr:nth-child(even) { background: #FAF9F8; }
+  tbody tr:hover { background: #EFF6FC; }
+  td.lib { max-width: 380px; overflow: hidden; text-overflow: ellipsis; }
+  td.warn { color: #E66C37; font-weight: 600; }
+  td.crit { color: #D13438; font-weight: 600; }
+  .nm { color: #8A8886; font-style: italic; }
+  tfoot td { padding: 6px 10px; font-weight: 600; border-top: 2px solid #C8C6C4; background: #F3F2F1;
+    position: sticky; bottom: 0; font-variant-numeric: tabular-nums; }
+  tfoot td.num { text-align: right; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="cards">
+    <div class="card tot"><div class="t">À prévoir <span class="an">N+1</span> (contrats)</div>
+      <div class="v" id="vTot">—</div><div class="s" id="sTot"></div></div>
+    <div class="card ren"><div class="t">Dont déjà renouvelés / engagés</div>
+      <div class="v" id="vRen">—</div><div class="s">statut « Renouvelé »</div></div>
+    <div class="card att"><div class="t">Dont à arbitrer</div>
+      <div class="v" id="vAtt">—</div><div class="s">à renouveler + en cours</div></div>
+    <div class="card eco"><div class="t">Économies (non renouvelés)</div>
+      <div class="v" id="vEco">—</div><div class="s">sortis de la projection</div></div>
+  </div>
+  <div id="box"><table>
+    <thead><tr>
+      <th>Ligne budgétaire (via imputation)</th><th class="num">Contrats</th>
+      <th class="num" id="hProj">À prévoir N+1</th><th class="num" id="hBud">Budgété N</th><th class="num">Poids</th>
+    </tr></thead>
+    <tbody id="body"></tbody>
+    <tfoot><tr id="foot"></tr></tfoot>
+  </table></div>
+</div>
+<script>
+(function () {
+  "use strict";
+  // Année cible : ?annee=<n>, sinon exercice majoritaire de Lignes_Budget + 1,
+  // sinon année courante + 1. Rien n'est figé dans le code.
+  var AN_FORCE = parseInt(new URLSearchParams(window.location.search).get("annee") || "0", 10) || null;
+  var AN = AN_FORCE || ((new Date()).getFullYear() + 1);
+  var euro = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
+  var pct  = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+  var fe = function (v) { return euro.format(Math.round(v || 0)) + " €"; };
+  var CONTRATS = [], LIGNES = null;
+
+  function setLabels() {
+    document.querySelectorAll(".an").forEach(function (e) { e.textContent = AN; });
+    document.getElementById("hProj").textContent = "À prévoir " + AN;
+    document.getElementById("hBud").textContent = "Budgété " + (AN - 1);
+  }
+  setLabels();
+
+  function tokens(imp) {
+    return String(imp || "").trim().split(/\s+/).filter(Boolean);
+  }
+
+  function render() {
+    if (!CONTRATS.length || !LIGNES) return;
+    // index des lignes budgétaires : gestionnaire|nature[|opération]
+    var byKey = {};
+    var n = LIGNES.id.length;
+    for (var i = 0; i < n; i++) {
+      var g = String(LIGNES.Gestionnaire ? LIGNES.Gestionnaire[i] : "").trim();
+      var na = String(LIGNES.Nature ? LIGNES.Nature[i] : "").trim();
+      var op = String(LIGNES.Operation ? LIGNES.Operation[i] : "").trim();
+      var rec = { lib: (LIGNES.Libelle_Complet ? LIGNES.Libelle_Complet[i] : na), bud: (LIGNES.Budgete ? LIGNES.Budgete[i] : 0) || 0 };
+      if (g && na) { byKey[g + "|" + na + "|" + op] = rec; if (!(g + "|" + na in byKey)) byKey[g + "|" + na] = rec; }
+    }
+    var groups = {}, totRen = 0, totAtt = 0, totEco = 0, nbProj = 0;
+    CONTRATS.forEach(function (r) {
+      var prix = r.Prix || 0;
+      if (r.Renouvellement === "Non renouvelé") { totEco += prix; return; }
+      if (r.Renouvellement === "Renouvelé") totRen += prix; else totAtt += prix;
+      nbProj++;
+      var tk = tokens(r.Imputation);        // [enveloppe, gestionnaire, nature, opération?]
+      var rec = null;
+      if (tk.length >= 3) rec = byKey[tk[1] + "|" + tk[2] + "|" + (tk[3] || "")] || byKey[tk[1] + "|" + tk[2]] || null;
+      var key = rec ? "L:" + rec.lib : (tk.length ? "I:" + tk.join(" ") : "I:(sans imputation)");
+      if (!groups[key]) groups[key] = { lib: rec ? rec.lib : (tk.length ? tk.join(" ") : "(sans imputation)"),
+        matched: !!rec, bud: rec ? rec.bud : 0, sum: 0, nb: 0 };
+      groups[key].sum += prix; groups[key].nb++;
+    });
+    var keys = Object.keys(groups).sort(function (a, b) { return groups[b].sum - groups[a].sum; });
+
+    var tot = totRen + totAtt;
+    document.getElementById("vTot").textContent = fe(tot);
+    document.getElementById("sTot").textContent = nbProj + " contrat(s) reconduits ou à arbitrer";
+    document.getElementById("vRen").textContent = fe(totRen);
+    document.getElementById("vAtt").textContent = fe(totAtt);
+    document.getElementById("vEco").textContent = fe(totEco);
+
+    var sumBud = 0;
+    document.getElementById("body").innerHTML = keys.map(function (k) {
+      var g = groups[k]; sumBud += g.bud;
+      var poids = g.bud ? (g.sum / g.bud) * 100 : null;
+      var cls = poids == null ? "" : (poids >= 100 ? " crit" : (poids > 90 ? " warn" : ""));
+      return "<tr><td class=\"lib" + (g.matched ? "" : " nm") + "\" title=\"" + g.lib.replace(/"/g, "&quot;") + "\">" +
+        (g.matched ? "" : "&#9888;&#65039; ") + g.lib.replace(/</g, "&lt;") + "</td>" +
+        '<td class="num">' + g.nb + "</td>" +
+        '<td class="num">' + fe(g.sum) + "</td>" +
+        '<td class="num">' + (g.matched ? fe(g.bud) : "—") + "</td>" +
+        '<td class="num' + cls + '">' + (poids == null ? "—" : pct.format(poids) + " %") + "</td></tr>";
+    }).join("");
+    document.getElementById("foot").innerHTML =
+      "<td>Total</td><td class=\"num\">" + nbProj + "</td>" +
+      '<td class="num">' + fe(tot) + "</td>" +
+      '<td class="num">' + fe(sumBud) + "</td>" +
+      '<td class="num">' + (sumBud ? pct.format(tot / sumBud * 100) + " %" : "—") + "</td>";
+  }
+
+  function start() {
+    if (!window.grist) return;
+    grist.ready({ requiredAccess: "full" });
+    grist.onRecords(function (records) { CONTRATS = records || []; render(); });
+    grist.docApi.fetchTable("Lignes_Budget").then(function (t) {
+      LIGNES = t;
+      if (!AN_FORCE && t.Exercice && t.Exercice.length) {   // exercice majoritaire des données
+        var counts = {}, best = null;
+        t.Exercice.forEach(function (e) { e = parseInt(e, 10); if (e) counts[e] = (counts[e] || 0) + 1; });
+        Object.keys(counts).forEach(function (k) { if (best == null || counts[k] > counts[best]) best = k; });
+        if (best) { AN = parseInt(best, 10) + 1; setLabels(); }
+      }
+      render();
+    })
+      .catch(function (e) { try { console.warn("prepa-dsi : Lignes_Budget illisible —", e && e.message || e); } catch (x) {} });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+})();
+</script>
+</body>
+</html>

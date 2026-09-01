@@ -150,7 +150,9 @@
   var bar = document.getElementById("bar");
   var brand = document.createElement("div");
   brand.id = "brand";
-  brand.textContent = "BUDGET DSI 2026";
+  // Marque : ?titre=<texte> sinon "BUDGET DSI <?annee= ou année courante>" — rien en dur.
+  var AN0 = parseInt(QS0.get("annee") || "0", 10) || (new Date()).getFullYear();
+  brand.textContent = QS0.get("titre") || ("BUDGET DSI " + AN0);
   var dot = document.createElement("span");
   dot.id = "st";
   dot.style.cssText = "width:7px;height:7px;border-radius:50%;margin-left:8px;background:#605E5C;flex:0 0 auto;align-self:center;";

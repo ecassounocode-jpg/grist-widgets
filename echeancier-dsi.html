@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Échéancier des renouvellements</title>
+<!--
+  Widget Grist : échéancier des renouvellements de contrats (style Power BI).
+  - Source liée : table Contrats, accès « Lire la table sélectionnée ».
+  - Tri par échéance croissante (date de demande d'engagement, sinon date de fin).
+  - Badge de délai : échu (rouge), < 60 j (orange), sinon neutre.
+  - Les « Non renouvelé » sont masqués par défaut (?tous=1 pour les afficher).
+  - Aucune URL codée en dur.
+-->
+<script src="grist-plugin-api.js"></script>
+<script>
+  if (!window.grist) {
+    document.write('<script src="https://docs.getgrist.com/grist-plugin-api.js"><\/script>');
+  }
+</script>
+<style>
+  :root { color-scheme: light; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+    font-family: "Segoe UI", -apple-system, Roboto, Arial, sans-serif; color: #252423; background: #fff; }
+  #box { height: 100%; overflow: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  thead th { position: sticky; top: 0; background: #F3F2F1; font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .3px; padding: 6px 10px; border-bottom: 2px solid #C8C6C4;
+    white-space: nowrap; text-align: left; z-index: 1; }
+  thead th.num { text-align: right; }
+  tbody td { padding: 5px 10px; border-bottom: 1px solid #EDEBE9; white-space: nowrap; }
+  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr:nth-child(even) { background: #FAF9F8; }
+  tbody tr:hover { background: #EFF6FC; }
+  td.lib { max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+  .b { display: inline-block; min-width: 64px; text-align: center; padding: 1px 8px;
+    border-radius: 9px; font-size: 11px; font-weight: 600; }
+  .b.echu { background: #FDE7E9; color: #A80000; }
+  .b.proche { background: #FFF4CE; color: #8A6A00; }
+  .b.ok { background: #F3F2F1; color: #605E5C; }
+  .st { display: inline-block; padding: 1px 8px; border-radius: 9px; font-size: 11px; font-weight: 600; }
+  .st.aren { background: #FFF4CE; color: #8A6A00; }
+  .st.enc  { background: #EFF6FC; color: #118DFF; }
+  .st.ren  { background: #DFF6DD; color: #107C10; }
+  .st.non  { background: #F3F2F1; color: #605E5C; }
+</style>
+</head>
+<body>
+<div id="box"><table>
+  <thead><tr>
+    <th>Échéance</th><th>Date</th><th>Fournisseur</th><th>Objet</th>
+    <th class="num">Prix</th><th>Renouvellement</th><th>Signataire</th>
+  </tr></thead>
+  <tbody id="body"></tbody>
+</table></div>
+<script>
+(function () {
+  "use strict";
+  var TOUS = new URLSearchParams(window.location.search).get("tous") === "1";
+  var euro = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
+  var fdat = new Intl.DateTimeFormat("fr-FR");
+  var STC = { "À renouveler": "aren", "En cours": "enc", "Renouvelé": "ren", "Non renouvelé": "non" };
+
+  function render(records) {
+    var now = Date.now();
+    var rows = (records || []).filter(function (r) { return TOUS || r.Renouvellement !== "Non renouvelé"; })
+      .map(function (r) {
+        var ts = r.Demande_engagement || r.Date_fin || null;   // secondes epoch (colonnes Date Grist)
+        return { r: r, ts: ts ? ts * 1000 : null };
+      });
+    rows.sort(function (a, b) {
+      if (a.ts == null && b.ts == null) return 0;
+      if (a.ts == null) return 1;
+      if (b.ts == null) return -1;
+      return a.ts - b.ts;
+    });
+    document.getElementById("body").innerHTML = rows.map(function (x) {
+      var r = x.r;
+      var badge;
+      if (x.ts == null) badge = '<span class="b ok">sans date</span>';
+      else {
+        var j = Math.round((x.ts - now) / 86400000);
+        if (j < 0) badge = '<span class="b echu">échu ' + (-j) + " j</span>";
+        else if (j <= 60) badge = '<span class="b proche">J&#8722;' + j + "</span>";
+        else badge = '<span class="b ok">J&#8722;' + j + "</span>";
+      }
+      var st = STC[r.Renouvellement] || "ok";
+      return "<tr><td>" + badge + "</td>" +
+        "<td>" + (x.ts ? fdat.format(new Date(x.ts)) : "—") + "</td>" +
+        '<td class="lib" title="' + String(r.Fournisseur || "").replace(/"/g, "&quot;") + '">' + String(r.Fournisseur || "").replace(/</g, "&lt;") + "</td>" +
+        '<td class="lib" title="' + String(r.Objet || "").replace(/"/g, "&quot;") + '">' + String(r.Objet || "").replace(/</g, "&lt;") + "</td>" +
+        '<td class="num">' + euro.format(Math.round(r.Prix || 0)) + " €</td>" +
+        '<td><span class="st ' + st + '">' + String(r.Renouvellement || "—").replace(/</g, "&lt;") + "</span></td>" +
+        "<td>" + String(r.Signataire || "").replace(/</g, "&lt;") + "</td></tr>";
+    }).join("");
+  }
+
+  function start() {
+    if (!window.grist) return;
+    grist.ready({ requiredAccess: "read table" });
+    grist.onRecords(function (records) { render(records || []); });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+})();
+</script>
+</body>
+</html>

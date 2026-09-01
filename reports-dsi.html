@@ -88,6 +88,7 @@
 <script>
 (function () {
   "use strict";
+  var AN_FORCE = parseInt(new URLSearchParams(window.location.search).get("annee") || "0", 10) || null;
   var euro = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
   var pctf = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
   var fe = function (v) { return euro.format(Math.round(v || 0)) + " €"; };
@@ -100,7 +101,22 @@
     return null;
   }
 
+  function refYear() {
+    if (AN_FORCE) return AN_FORCE;
+    var counts = {};
+    DATA.forEach(function (r) {
+      var e = parseInt(r.Exercice, 10);
+      if (e) counts[e] = (counts[e] || 0) + 1;
+    });
+    var best = null;
+    Object.keys(counts).forEach(function (k) { if (best == null || counts[k] > counts[best]) best = k; });
+    return best ? parseInt(best, 10) : (new Date()).getFullYear();
+  }
+
   function render() {
+    var AN = refYear();
+    document.querySelector(".card.in .t").innerHTML = "Reports entrants " + (AN - 1) + " &#8594; " + AN;
+    document.querySelector(".card.out .t").textContent = "À reporter vers " + (AN + 1) + " — investissement";
     var totIn = 0, totI = 0, totF = 0, totBud = 0;
     DATA.forEach(function (r) {
       var i = inVal(r);
@@ -111,7 +127,7 @@
     });
     document.getElementById("vIn").textContent = HAS_IN ? fe(totIn) : "—";
     document.getElementById("sIn").textContent = HAS_IN
-      ? (totBud ? pctf.format(totIn / totBud * 100) + " % du budgété 2026" : "crédits reportés inscrits au budget")
+      ? (totBud ? pctf.format(totIn / totBud * 100) + " % du budgété " + AN : "crédits reportés inscrits au budget")
       : "en attente de l'état CNF des reports";
     document.getElementById("vOutI").textContent = fe(totI);
     document.getElementById("vOutF").textContent = fe(totF);
@@ -120,8 +136,8 @@
     var COLS = [
       { id: "Libelle_Complet", lb: "Ligne budgétaire", type: "lib" },
       { id: "Section",         lb: "Section",          type: "txt" },
-      { id: "__in",            lb: "Reports 2025",     type: "eur" },
-      { id: "Budgete",         lb: "Budgété 2026",     type: "eur" },
+      { id: "__in",            lb: "Reports " + (AN - 1), type: "eur" },
+      { id: "Budgete",         lb: "Budgété " + AN,    type: "eur" },
       { id: "ENS",             lb: "À reporter / solder", type: "eur" },
       { id: "__part",          lb: "Part du budgété",  type: "pct" }
     ];
