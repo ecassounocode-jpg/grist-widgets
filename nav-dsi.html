@@ -20,7 +20,11 @@
   // AUCUNE URL codée en dur : le widget détecte tout seul le document Grist qui
   // l'héberge (grist.getAccessToken → origine + id du document). Surcharge possible
   // via ?base=<url encodée du document> si besoin. Nécessite un accès en lecture.
-  var DOC_BASE = new URLSearchParams(window.location.search).get("base") || null;
+  var QS0 = new URLSearchParams(window.location.search);
+  var DOC_BASE = QS0.get("base") || null;
+  // N° de la page Reports : varie selon le document (l'id de vue est attribué à la
+  // création). Surcharge : ?reports=<n> dans l'URL du widget (défaut 15).
+  var REPORTS_PAGE = parseInt(QS0.get("reports") || "15", 10);
   var PAGES = [
     { p: 8,  label: "Synthèse",          icon: "&#127968;" },
     { p: 9,  label: "Budget",            icon: "&#128202;" },
@@ -29,7 +33,7 @@
     { p: 11, label: "Engagements & BC",  icon: "&#128221;" },
     { p: 12, label: "Marchés",           icon: "&#128193;" },
     { p: 13, label: "Fournisseurs",      icon: "&#127970;" },
-    { p: 15, label: "Reports",           icon: "&#128257;" }
+    { p: REPORTS_PAGE, label: "Reports",  icon: "&#128257;" }
   ];
 </script>
 <!-- API Grist : indispensable pour l'auto-détection du document hôte -->
@@ -85,31 +89,47 @@
   var active = parseInt(qs.get("active") || "0", 10);
 
   // Découverte de l'URL du document hôte (une seule fois, mise en cache)
-  var basePromise = null;
+  var lastErr = null;
   function getBase() {
     if (DOC_BASE) return Promise.resolve(DOC_BASE);
-    if (!basePromise) {
-      basePromise = (window.grist && grist.getAccessToken
-        ? grist.getAccessToken({ readOnly: true }).then(function (t) {
-            var parts = String(t.baseUrl).split("/api/docs/");
-            DOC_BASE = parts[0] + "/" + parts[1].split("/")[0];
-            return DOC_BASE;
-          }).catch(function () { return null; })
-        : Promise.resolve(null));
+    if (!window.grist || !grist.getAccessToken) {
+      lastErr = "API Grist absente"; setState("err");
+      return Promise.resolve(null);
     }
-    return basePromise;
+    var timeout = new Promise(function (res) {
+      setTimeout(function () { res({ __timeout: true }); }, 4000);
+    });
+    return Promise.race([grist.getAccessToken({ readOnly: true }), timeout])
+      .then(function (t) {
+        if (!t || t.__timeout) { lastErr = "getAccessToken sans réponse (délai)"; setState("err"); return null; }
+        var parts = String(t.baseUrl).split("/api/docs/");
+        if (parts.length < 2) { lastErr = "baseUrl inattendu : " + t.baseUrl; setState("err"); return null; }
+        DOC_BASE = parts[0] + "/" + parts[1].split("/")[0];
+        lastErr = null; setState("ok");
+        return DOC_BASE;                      // succès mis en cache ; échec jamais
+      })
+      .catch(function (e) {
+        lastErr = "getAccessToken refusé : " + (e && e.message || e); setState("err");
+        return null;
+      });
+  }
+  function setState(st) {
+    var dot = document.getElementById("st");
+    if (!dot) return;
+    dot.style.background = st === "ok" ? "#1AAB40" : "#D13438";
+    dot.title = st === "ok" ? "Document hôte détecté" : ("Navigation indisponible — " + (lastErr || "cause inconnue"));
+    if (lastErr) { try { console.warn("nav-dsi:", lastErr); } catch (e) {} }
   }
   if (window.grist) { try { grist.ready({ requiredAccess: "read table" }); } catch (e) {} }
-  // Pré-chargement : l'URL du document est connue AVANT le premier clic
-  // (la navigation reste alors dans le délai d'activation utilisateur du navigateur).
-  getBase().then(function (b) {
-    if (!b) console.warn("nav-dsi : document hôte non détecté (grist-plugin-api absent ou accès insuffisant).");
-  });
 
   var bar = document.getElementById("bar");
   var brand = document.createElement("div");
   brand.id = "brand";
   brand.textContent = "BUDGET DSI 2026";
+  var dot = document.createElement("span");
+  dot.id = "st";
+  dot.style.cssText = "width:7px;height:7px;border-radius:50%;margin-left:8px;background:#605E5C;flex:0 0 auto;align-self:center;";
+  brand.appendChild(dot);
   bar.appendChild(brand);
 
   PAGES.forEach(function (pg) {
@@ -127,6 +147,11 @@
     });
     bar.appendChild(b);
   });
+
+  // Pré-chargement : l'URL du document est connue AVANT le premier clic
+  // (la navigation reste dans le délai d'activation utilisateur du navigateur)
+  // et la pastille d'état (vert/rouge) reflète le résultat.
+  getBase();
 })();
 </script>
 </body>
