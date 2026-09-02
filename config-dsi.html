@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Configuration du tableau de bord</title>
+<!--
+  Widget Grist : formulaire de paramétrage initial du tableau de bord.
+  - Accès requis : « Accès complet » (lit ET écrit les tables Parametres*,
+    et applique la configuration aux URLs du bandeau de navigation).
+  - Au premier chargement (table Parametres vide) : assistant de configuration.
+    Ensuite : récapitulatif + bouton Modifier.
+  - Sans droits d'édition (lecteur anonyme) : récapitulatif en lecture seule.
+  - Aucune URL ni valeur codée en dur : tout vient des tables Parametres*.
+-->
+<script src="grist-plugin-api.js"></script>
+<script>
+  if (!window.grist) {
+    document.write('<script src="https://docs.getgrist.com/grist-plugin-api.js"><\/script>');
+  }
+</script>
+<style>
+  :root { color-scheme: light; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: auto;
+    font-family: "Segoe UI", -apple-system, Roboto, Arial, sans-serif; color: #252423; background: #FAF9F8; }
+  #wrap { max-width: 860px; margin: 0 auto; padding: 18px 20px 40px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #605E5C; font-size: 13px; margin-bottom: 18px; }
+  fieldset { border: 1px solid #E1DFDD; border-radius: 6px; background: #fff;
+    margin: 0 0 14px; padding: 12px 16px 14px; }
+  legend { font-weight: 600; font-size: 13px; color: #118DFF; padding: 0 6px; }
+  label { display: block; font-size: 11.5px; color: #605E5C; margin: 8px 0 3px; }
+  input[type=text], input[type=number], select { font: inherit; font-size: 13px;
+    padding: 5px 8px; border: 1px solid #C8C6C4; border-radius: 4px; width: 260px; }
+  input:focus, select:focus { outline: none; border-color: #118DFF; }
+  .row { display: flex; gap: 18px; flex-wrap: wrap; }
+  .row > div { flex: 0 0 auto; }
+  .chk { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 6px 0; }
+  table.liste { border-collapse: collapse; margin-top: 6px; }
+  table.liste td { padding: 2px 4px; }
+  table.liste input { width: 150px; }
+  table.liste input.long { width: 280px; }
+  table.liste input.court { width: 90px; }
+  .del { cursor: pointer; color: #A80000; font-weight: 700; padding: 0 6px; }
+  .add { cursor: pointer; color: #118DFF; font-size: 12.5px; margin-top: 4px; display: inline-block; }
+  #actions { margin-top: 16px; display: flex; gap: 12px; align-items: center; }
+  button { font: inherit; font-size: 13.5px; padding: 8px 22px; border-radius: 4px;
+    border: 1px solid transparent; cursor: pointer; }
+  #save { background: #118DFF; color: #fff; font-weight: 600; }
+  #save:disabled { background: #C8C6C4; cursor: default; }
+  #edit { background: #fff; border-color: #C8C6C4; }
+  #msg { font-size: 13px; }
+  #msg.ok { color: #107C10; } #msg.err { color: #A80000; }
+  .resume { background: #fff; border: 1px solid #E1DFDD; border-radius: 6px; padding: 14px 18px; }
+  .resume dt { font-size: 11px; text-transform: uppercase; color: #605E5C; margin-top: 10px; }
+  .resume dd { margin: 2px 0 0; font-size: 14px; }
+  .pastille { display: inline-block; width: 11px; height: 11px; border-radius: 2px;
+    vertical-align: -1px; margin-right: 5px; }
+  .hint { font-size: 11.5px; color: #8A8886; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>⚙ Configuration du tableau de bord</h1>
+  <div class="sub" id="sousTitre">Chargement…</div>
+  <div id="contenu"></div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var P = null, ENV = [], CODES = [], PERIM = [], PEUT_ECRIRE = false;
+
+  function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
+  function colonnes(t) {  // format colonne -> liste d'objets
+    var n = (t.id || []).length, out = [];
+    for (var i = 0; i < n; i++) {
+      var o = { id: t.id[i] };
+      for (var k in t) if (k !== "id") o[k] = t[k][i];
+      out.push(o);
+    }
+    return out;
+  }
+
+  // ---------------- récapitulatif (mode lecture) ----------------
+  function resume() {
+    var mods = [P.Mod_Contrats && "Contrats", P.Mod_Prepa && "Prépa budget", P.Mod_Reports && "Reports"]
+      .filter(Boolean).join(", ") || "aucun module optionnel";
+    document.getElementById("sousTitre").textContent =
+      "Paramétrage appliqué" + (PEUT_ECRIRE ? "" : " — lecture seule");
+    document.getElementById("contenu").innerHTML =
+      '<dl class="resume">' +
+      "<dt>Collectivité / service</dt><dd>" + esc(P.Collectivite) + " — " + esc(P.Service) + "</dd>" +
+      "<dt>Titre du bandeau</dt><dd>" + esc(P.Titre_Bandeau) +
+        (P.Exercice_Force ? " (exercice forcé : " + P.Exercice_Force + ")" : " (exercice automatique)") + "</dd>" +
+      "<dt>Seuils</dt><dd>Engagement " + Math.round((P.Seuil_Engagement || 0.9) * 100) +
+        " % · DGP " + P.Seuil_DGP + " j (pré-alerte " + P.Seuil_DGP_Prealerte +
+        " j) · marché " + P.Seuil_Marche_Expire + " j · échéancier " + P.Seuil_Echeancier + " j</dd>" +
+      "<dt>Modules actifs</dt><dd>" + mods + "</dd>" +
+      "<dt>Enveloppes</dt><dd>" + ENV.map(function (e) {
+        return '<span class="pastille" style="background:' + esc(e.Couleur) + '"></span>' + esc(e.Code);
+      }).join(" &nbsp; ") + "</dd>" +
+      "<dt>Traductions CNF / périmètre BC</dt><dd>" + CODES.length + " codes · " +
+        PERIM.length + " règles de périmètre</dd></dl>" +
+      (PEUT_ECRIRE ? '<div id="actions"><button id="edit">Modifier la configuration</button></div>' : "");
+    var b = document.getElementById("edit");
+    if (b) b.onclick = formulaire;
+  }
+
+  // ---------------- formulaire (mode édition / premier lancement) ------
+  function ligneListe(vals, defs) {
+    return "<tr>" + defs.map(function (d) {
+      if (d.type === "select")
+        return '<td><select data-c="' + d.c + '">' + d.opts.map(function (o) {
+          return '<option' + (vals[d.c] === o ? " selected" : "") + ">" + o + "</option>";
+        }).join("") + "</select></td>";
+      return '<td><input class="' + (d.cls || "") + '" data-c="' + d.c + '" value="' + esc(vals[d.c]) + '"></td>';
+    }).join("") + '<td class="del" title="Retirer">✕</td></tr>';
+  }
+  function tableListe(id, items, defs, entetes) {
+    return '<table class="liste" id="' + id + '"><tr>' +
+      entetes.map(function (h) { return "<td><b style='font-size:11px'>" + h + "</b></td>"; }).join("") +
+      "<td></td></tr>" +
+      items.map(function (v) { return ligneListe(v, defs); }).join("") +
+      '</table><span class="add" data-t="' + id + '">+ ajouter une ligne</span>';
+  }
+
+  function formulaire() {
+    var p = P || {};
+    document.getElementById("sousTitre").textContent = P && P.Configure
+      ? "Modifier le paramétrage — les changements s'appliquent à l'enregistrement."
+      : "Premier lancement : renseignez les paramètres puis enregistrez — le tableau de bord s'adapte.";
+    document.getElementById("contenu").innerHTML =
+      '<fieldset><legend>Identité</legend><div class="row">' +
+      '<div><label>Collectivité</label><input type="text" id="f_col" value="' + esc(p.Collectivite) + '"></div>' +
+      '<div><label>Service</label><input type="text" id="f_srv" value="' + esc(p.Service) + '"></div>' +
+      '<div><label>Titre du bandeau</label><input type="text" id="f_titre" value="' + esc(p.Titre_Bandeau) + '">' +
+      '<div class="hint">L\'année s\'ajoute automatiquement au titre.</div></div>' +
+      '<div><label>Exercice forcé (0 = automatique)</label><input type="number" id="f_exo" value="' + (p.Exercice_Force || 0) + '"></div>' +
+      "</div></fieldset>" +
+      '<fieldset><legend>Seuils d\'alerte</legend><div class="row">' +
+      '<div><label>Taux d\'engagement (alerte 🟠), %</label><input type="number" id="f_eng" value="' + Math.round((p.Seuil_Engagement || 0.9) * 100) + '"></div>' +
+      '<div><label>Délai global de paiement, jours</label><input type="number" id="f_dgp" value="' + (p.Seuil_DGP || 30) + '"></div>' +
+      '<div><label>Pré-alerte DGP, jours</label><input type="number" id="f_pre" value="' + (p.Seuil_DGP_Prealerte || 20) + '"></div>' +
+      '<div><label>Préavis fin de marché, jours</label><input type="number" id="f_mar" value="' + (p.Seuil_Marche_Expire || 365) + '"></div>' +
+      '<div><label>Échéancier contrats (badge 🟠), jours</label><input type="number" id="f_ech" value="' + (p.Seuil_Echeancier || 60) + '"></div>' +
+      "</div></fieldset>" +
+      '<fieldset><legend>Modules</legend>' +
+      '<label class="chk"><input type="checkbox" id="f_mc"' + (p.Mod_Contrats ? " checked" : "") + "> Suivi des contrats (pages Contrats)</label>" +
+      '<label class="chk"><input type="checkbox" id="f_mp"' + (p.Mod_Prepa ? " checked" : "") + "> Préparation budgétaire N+1</label>" +
+      '<label class="chk"><input type="checkbox" id="f_mr"' + (p.Mod_Reports ? " checked" : "") + "> Reports de crédits</label>" +
+      '<div class="hint">Un module décoché disparaît du bandeau de navigation (la page reste accessible aux éditeurs via le panneau latéral).</div>' +
+      "</fieldset>" +
+      '<fieldset><legend>Enveloppes budgétaires</legend>' +
+      tableListe("t_env", ENV, [{ c: "Code", cls: "court" }, { c: "Libelle", cls: "long" }, { c: "Couleur", cls: "court" }],
+        ["Code", "Libellé", "Couleur"]) + "</fieldset>" +
+      '<fieldset><legend>Traduction des codes CNF</legend>' +
+      tableListe("t_codes", CODES, [{ c: "Type", type: "select", opts: ["facture", "liquidation"] },
+        { c: "Code", cls: "court" }, { c: "Libelle", cls: "long" }], ["Type", "Code", "Libellé"]) + "</fieldset>" +
+      '<fieldset><legend>Périmètre des bons de commande</legend>' +
+      tableListe("t_perim", PERIM, [{ c: "Type", type: "select", opts: ["demandeur", "prefixe_commande"] },
+        { c: "Valeur", cls: "court" }], ["Type", "Valeur"]) + "</fieldset>" +
+      '<div id="actions"><button id="save">Enregistrer et appliquer</button><span id="msg"></span></div>';
+
+    document.getElementById("contenu").addEventListener("click", function (ev) {
+      if (ev.target.classList.contains("del")) ev.target.parentElement.remove();
+      if (ev.target.classList.contains("add")) {
+        var t = document.getElementById(ev.target.getAttribute("data-t"));
+        var defs = { t_env: [{ c: "Code", cls: "court" }, { c: "Libelle", cls: "long" }, { c: "Couleur", cls: "court" }],
+                     t_codes: [{ c: "Type", type: "select", opts: ["facture", "liquidation"] }, { c: "Code", cls: "court" }, { c: "Libelle", cls: "long" }],
+                     t_perim: [{ c: "Type", type: "select", opts: ["demandeur", "prefixe_commande"] }, { c: "Valeur", cls: "court" }] }[t.id];
+        t.insertAdjacentHTML("beforeend", ligneListe({}, defs));
+      }
+    });
+    document.getElementById("save").onclick = enregistrer;
+  }
+
+  function lireListe(id) {
+    var out = [];
+    var lignes = document.getElementById(id).querySelectorAll("tr");
+    for (var i = 1; i < lignes.length; i++) {
+      var o = {}, vide = true;
+      lignes[i].querySelectorAll("[data-c]").forEach(function (el) {
+        o[el.getAttribute("data-c")] = el.value.trim();
+        if (el.value.trim()) vide = false;
+      });
+      if (!vide) out.push(o);
+    }
+    return out;
+  }
+
+  // ---------------- enregistrement : tables + application au bandeau ----
+  function enregistrer() {
+    var btn = document.getElementById("save"), msg = document.getElementById("msg");
+    btn.disabled = true; msg.className = ""; msg.textContent = "Enregistrement…";
+    var v = {
+      Collectivite: document.getElementById("f_col").value.trim(),
+      Service: document.getElementById("f_srv").value.trim(),
+      Titre_Bandeau: document.getElementById("f_titre").value.trim() || "TABLEAU DE BORD",
+      Exercice_Force: parseInt(document.getElementById("f_exo").value, 10) || 0,
+      Seuil_Engagement: (parseInt(document.getElementById("f_eng").value, 10) || 90) / 100,
+      Seuil_DGP: parseInt(document.getElementById("f_dgp").value, 10) || 30,
+      Seuil_DGP_Prealerte: parseInt(document.getElementById("f_pre").value, 10) || 20,
+      Seuil_Marche_Expire: parseInt(document.getElementById("f_mar").value, 10) || 365,
+      Seuil_Echeancier: parseInt(document.getElementById("f_ech").value, 10) || 60,
+      Mod_Contrats: document.getElementById("f_mc").checked,
+      Mod_Prepa: document.getElementById("f_mp").checked,
+      Mod_Reports: document.getElementById("f_mr").checked,
+      Configure: true
+    };
+    var env = lireListe("t_env"), codes = lireListe("t_codes"), perim = lireListe("t_perim");
+
+    charger().then(function (etat) {          // relire les ids à jour
+      var actions = [];
+      if (etat.pid) actions.push(["UpdateRecord", "Parametres", etat.pid, v]);
+      else actions.push(["AddRecord", "Parametres", null, v]);
+      function remplace(table, anciens, nouveaux, colsDef) {
+        if (anciens.length) actions.push(["BulkRemoveRecord", table, anciens]);
+        if (nouveaux.length) {
+          var cols = {};
+          colsDef.forEach(function (c) { cols[c] = nouveaux.map(function (x) { return x[c] || ""; }); });
+          actions.push(["BulkAddRecord", table, nouveaux.map(function () { return null; }), cols]);
+        }
+      }
+      remplace("Parametres_Enveloppes", etat.envIds, env, ["Code", "Libelle", "Couleur"]);
+      remplace("Parametres_Codes", etat.codeIds, codes, ["Type", "Code", "Libelle"]);
+      remplace("Parametres_Perimetre_BC", etat.perimIds, perim, ["Type", "Valeur"]);
+      return grist.docApi.applyUserActions(actions)
+        .then(function () { return appliquerBandeau(v, etat.p || {}); });
+    }).then(function (nb) {
+      msg.className = "ok";
+      msg.textContent = "✓ Enregistré — bandeau mis à jour sur " + nb + " page(s). Recharger la page pour voir le résultat.";
+      btn.disabled = false;
+      return charger().then(rendre);
+    }).catch(function (e) {
+      msg.className = "err";
+      msg.textContent = "✗ Échec : " + (e && e.message || e) +
+        " (droits insuffisants ? Ce formulaire nécessite un compte éditeur.)";
+      btn.disabled = false;
+    });
+  }
+
+  // Réécrit les URLs des sections nav-dsi : titre, annee, reports, tabs (modules)
+  function appliquerBandeau(v, p) {
+    return grist.docApi.fetchTable("_grist_Views_section").then(function (t) {
+      var secs = colonnes(t), actions = [], nb = 0;
+      secs.forEach(function (s) {
+        var opts;
+        try { opts = JSON.parse(s.options || "{}") || {}; } catch (e) { return; }
+        var cv;
+        try { cv = JSON.parse(opts.customView || "{}") || {}; } catch (e) { return; }
+        if (!cv.url || cv.url.indexOf("nav-dsi.html") < 0) return;
+        var m = cv.url.split("?");
+        var q = new URLSearchParams(m[1] || "");
+        q.set("titre", v.Titre_Bandeau + (v.Exercice_Force ? " " + v.Exercice_Force : ""));
+        if (v.Exercice_Force) q.set("annee", String(v.Exercice_Force)); else q.delete("annee");
+        q.set("reports", v.Mod_Reports ? String(p.Page_Reports || 0) : "0");
+        var tabs = [];
+        if (v.Mod_Contrats && p.Page_Contrats) tabs.push(p.Page_Contrats + "|Contrats|📋");
+        if (v.Mod_Prepa && p.Page_Prepa) tabs.push(p.Page_Prepa + "|Prépa budget|🎯");
+        if (tabs.length) q.set("tabs", tabs.join(",")); else q.delete("tabs");
+        cv.url = m[0] + "?" + q.toString();
+        opts.customView = JSON.stringify(cv);
+        actions.push(["UpdateRecord", "_grist_Views_section", s.id, { options: JSON.stringify(opts) }]);
+        nb++;
+      });
+      return actions.length ? grist.docApi.applyUserActions(actions).then(function () { return nb; }) : 0;
+    });
+  }
+
+  // ---------------- chargement ------------------------------------------
+  function charger() {
+    return Promise.all([
+      grist.docApi.fetchTable("Parametres"),
+      grist.docApi.fetchTable("Parametres_Enveloppes"),
+      grist.docApi.fetchTable("Parametres_Codes"),
+      grist.docApi.fetchTable("Parametres_Perimetre_BC")
+    ]).then(function (r) {
+      var ps = colonnes(r[0]);
+      P = ps.length ? ps[0] : null;
+      ENV = colonnes(r[1]); CODES = colonnes(r[2]); PERIM = colonnes(r[3]);
+      return { p: P, pid: P ? P.id : null,
+               envIds: ENV.map(function (x) { return x.id; }),
+               codeIds: CODES.map(function (x) { return x.id; }),
+               perimIds: PERIM.map(function (x) { return x.id; }) };
+    });
+  }
+
+  function rendre() {
+    if (P && P.Configure) resume();
+    else if (PEUT_ECRIRE) formulaire();
+    else {
+      document.getElementById("sousTitre").textContent = "Tableau de bord non configuré.";
+      document.getElementById("contenu").innerHTML =
+        '<div class="resume">La configuration initiale doit être faite par un compte éditeur.</div>';
+    }
+  }
+
+  function start() {
+    if (!window.grist) { document.getElementById("sousTitre").textContent = "grist-plugin-api.js introuvable."; return; }
+    grist.ready({ requiredAccess: "full" });
+    // test d'écriture inoffensif pour distinguer éditeur / lecteur
+    charger().then(function () {
+      return grist.docApi.applyUserActions([]).then(function () { PEUT_ECRIRE = true; })
+        .catch(function () { PEUT_ECRIRE = false; });
+    }).then(rendre)
+      .catch(function (e) { document.getElementById("sousTitre").textContent = "Erreur : " + (e && e.message || e); });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+})();
+</script>
+</body>
+</html>

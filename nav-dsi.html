@@ -38,9 +38,10 @@
     { p: 10, label: "Factures",          icon: "&#128182;" },
     { p: 11, label: "Engagements & BC",  icon: "&#128722;" },
     { p: 12, label: "Marchés",           icon: "&#129309;" },
-    { p: 13, label: "Fournisseurs",      icon: "&#128666;" },
-    { p: REPORTS_PAGE, label: "Reports",  icon: "&#9193;" }
+    { p: 13, label: "Fournisseurs",      icon: "&#128666;" }
   ];
+  // Reports : masqué si ?reports=0 (module désactivé via la page Configuration)
+  if (REPORTS_PAGE > 0) PAGES.push({ p: REPORTS_PAGE, label: "Reports", icon: "&#9193;" });
 </script>
 <!-- API Grist : indispensable pour l'auto-détection du document hôte -->
 <script src="grist-plugin-api.js"></script>

@@ -14,6 +14,18 @@ Règles du jeu :
 
 ---
 
+## 2026-09-02
+
+- **config-dsi v1** — Nouveau widget « ⚙ Configuration » (accès complet) : formulaire de
+  paramétrage initial et de modification — identité (collectivité, service, titre du
+  bandeau, exercice forcé), seuils d'alerte (engagement, DGP, pré-alerte, fin de marché,
+  échéancier), modules on/off (Contrats, Prépa, Reports), enveloppes budgétaires,
+  traductions des codes CNF, périmètre BC. À l'enregistrement : écrit les tables
+  Parametres* ET réécrit les URLs du bandeau (titre, annee, reports, tabs). Récapitulatif
+  en lecture seule pour les non-éditeurs.
+- **nav-dsi v11** — `?reports=0` masque l'onglet Reports (module désactivé via la page
+  Configuration).
+
 ## 2026-09-01
 
 - **prepa-dsi v3** — Rapprochement budgétaire corrigé (état 189 : « Gestionnaire » = enveloppe
